@@ -46,12 +46,12 @@ Postman TUI de bolsillo para Termux. Stack: **Go + Bubble Tea**.
 - [x] Response: status + headers + body scrollable
 - [x] Tests: 25 (unitarios + integración), ~79% cobertura
 
-### Fase 2 — Request editor completo
-- [ ] Editor de headers (tabla key-value)
-- [ ] Editor de body (none / form-data / x-www-form-urlencoded / JSON / raw)
-- [ ] Query params editor
-- [ ] JSON syntax highlighting en response
-- [ ] Tests
+### Fase 2 — Request editor completo ✅
+- [x] Editor de headers (tabla key-value con KeyValueEditor)
+- [x] Editor de body (none / JSON / raw con textarea)
+- [x] Query params editor que modifica la URL
+- [x] JSON syntax highlighting en response
+- [x] Tests: 39 tests, 73-83% cobertura
 
 ### Fase 3 — Colecciones y persistencia
 - [ ] Schema JSON para colecciones (compatible Postman v2.1)

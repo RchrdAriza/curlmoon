@@ -107,6 +107,17 @@ var (
 				Padding(0, 2)
 )
 
+var (
+	editorAddBtn = lipgloss.NewStyle().
+			Foreground(success).
+			Padding(0, 1)
+
+	editorAddBtnFocus = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#000000")).
+				Background(success).
+				Padding(0, 1)
+)
+
 func methodStyle(method string) lipgloss.Style {
 	switch method {
 	case "GET":

@@ -3,9 +3,11 @@ package tui
 import (
 	"curlmoon/internal/httpclient"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,11 +20,10 @@ const (
 	panelResponse = 2
 
 	sidebarWidth = 26
-	methodsBarH  = 1
-	statusBarH   = 1
 )
 
 var methods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+var bodyTypes = []string{"none", "JSON", "raw", "form-data", "x-www-urlencoded"}
 
 type sidebarEntry struct {
 	name     string
@@ -34,34 +35,34 @@ type sidebarEntry struct {
 }
 
 type Model struct {
-	// Layout
 	width  int
 	height int
 	ready  bool
 
-	// Focus
 	activePanel int
 
-	// Sidebar
 	sidebar    []sidebarEntry
 	sidebarSel int
 	sidebarOff int
 
-	// Request
 	urlInput    textinput.Model
 	methodIndex int
 	activeTab   int
 	tabs        []string
 	sending     bool
 
-	// Response
-	response   *httpclient.Response
-	respView   viewport.Model
-	respErr    error
-	respReady  bool
-	showResp   bool
+	headers     KeyValueEditor
+	bodyType    int
+	bodyEditor  textarea.Model
+	params      KeyValueEditor
 
-	// Status
+	subFocus bool
+
+	response  *httpclient.Response
+	respView  viewport.Model
+	respErr   error
+	showResp  bool
+
 	statusMsg string
 }
 
@@ -72,6 +73,22 @@ func NewModel() Model {
 	ti.CharLimit = 2048
 	ti.Width = 60
 	ti.Focus()
+
+	headers := NewKeyValueEditor("Header", "Value")
+	headers.SetWidth(60)
+	headers.Blur()
+
+	be := textarea.New()
+	be.Placeholder = "Request body (JSON)..."
+	be.CharLimit = 0
+	be.SetWidth(50)
+	be.SetHeight(8)
+	be.ShowLineNumbers = false
+	be.Blur()
+
+	params := NewKeyValueEditor("Param", "Value")
+	params.SetWidth(60)
+	params.Blur()
 
 	sidebar := []sidebarEntry{
 		{name: "httpbin.org", isFolder: true, indent: 0},
@@ -94,13 +111,16 @@ func NewModel() Model {
 		activePanel: panelRequest,
 		activeTab:   0,
 		tabs:        []string{"Headers", "Body", "Auth", "Params"},
+		headers:     *headers,
+		bodyEditor:  be,
+		params:      *params,
 		respView:    viewport.New(0, 0),
-		statusMsg:   "Ready — Tab to switch panels, Ctrl+Enter to send",
+		statusMsg:   "Ready — Tab switches panels, Enter to edit fields",
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, textarea.Blink)
 }
 
 type responseMsg struct {
@@ -108,23 +128,69 @@ type responseMsg struct {
 	err  error
 }
 
+func (m Model) buildURL() string {
+	base := m.urlInput.Value()
+	pairs := m.params.Pairs()
+	if len(pairs) == 0 {
+		return base
+	}
+	vals := url.Values{}
+	for _, p := range pairs {
+		if p.Key != "" {
+			vals.Set(p.Key, p.Value)
+		}
+	}
+	qs := vals.Encode()
+	if qs == "" {
+		return base
+	}
+	if strings.Contains(base, "?") {
+		return base + "&" + qs
+	}
+	return base + "?" + qs
+}
+
+func (m Model) buildHeaders() map[string]string {
+	h := m.headers.ToMap()
+	if m.bodyType == 1 {
+		if _, ok := h["Content-Type"]; !ok {
+			h["Content-Type"] = "application/json"
+		}
+	} else if m.bodyType == 2 {
+		if _, ok := h["Content-Type"]; !ok {
+			h["Content-Type"] = "text/plain"
+		}
+	} else if m.bodyType == 4 {
+		if _, ok := h["Content-Type"]; !ok {
+			h["Content-Type"] = "application/x-www-form-urlencoded"
+		}
+	}
+	return h
+}
+
+func (m Model) buildBody() string {
+	switch m.bodyType {
+	case 1:
+		return m.bodyEditor.Value()
+	case 2:
+		return m.bodyEditor.Value()
+	}
+	return ""
+}
+
 func (m Model) doRequest() tea.Msg {
 	req := &httpclient.Request{
-		Method: methods[m.methodIndex],
-		URL:    m.urlInput.Value(),
+		Method:   methods[m.methodIndex],
+		URL:      m.buildURL(),
+		Headers:  m.buildHeaders(),
+		Body:     m.buildBody(),
+		BodyType: bodyTypes[m.bodyType],
 	}
 	if req.URL == "" {
 		return responseMsg{err: fmt.Errorf("URL is empty")}
 	}
 	resp, err := httpclient.Execute(req)
 	return responseMsg{resp: resp, err: err}
-}
-
-func (m Model) activeTabName() string {
-	if m.activeTab < len(m.tabs) {
-		return m.tabs[m.activeTab]
-	}
-	return ""
 }
 
 func (m Model) initLayout(w, h int) Model {
@@ -141,41 +207,42 @@ func (m Model) initLayout(w, h int) Model {
 		urlWidth = 20
 	}
 	m.urlInput.Width = urlWidth
+
+	editorW := w - sidebarWidth - 10
+	if editorW < 40 {
+		editorW = 40
+	}
+	m.headers.SetWidth(editorW)
+	m.params.SetWidth(editorW)
+	m.bodyEditor.SetWidth(editorW - 4)
+	bodyH := m.height/2 - 9
+	if bodyH < 3 {
+		bodyH = 3
+	}
+	m.bodyEditor.SetHeight(bodyH)
 	return m
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		if !m.ready {
-			m.ready = true
-		}
-		m.respView.Width = m.width - sidebarWidth - 4
-		m.respView.Height = m.height/2 - 3
-		if m.respView.Height < 5 {
-			m.respView.Height = 5
-		}
-		// Update URL input width
-		urlWidth := m.width - sidebarWidth - 28
-		if urlWidth < 20 {
-			urlWidth = 20
-		}
-		m.urlInput.Width = urlWidth
-		return m, nil
+		return m.initLayout(msg.Width, msg.Height), nil
 
 	case tea.KeyMsg:
-		// Global keys
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 
 		case "tab":
+			if m.activePanel == panelRequest && m.subFocus {
+				return m.handleRequestKey(msg)
+			}
 			m.activePanel = (m.activePanel + 1) % 3
 			m.urlInput.Blur()
+			m.headers.Blur()
+			m.params.Blur()
+			m.bodyEditor.Blur()
+			m.subFocus = false
 			if m.activePanel == panelRequest {
 				m.urlInput.Focus()
 			}
@@ -183,8 +250,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "shift+tab":
+			if m.activePanel == panelRequest && m.subFocus {
+				return m.handleRequestKey(msg)
+			}
 			m.activePanel = (m.activePanel + 2) % 3
 			m.urlInput.Blur()
+			m.headers.Blur()
+			m.params.Blur()
+			m.bodyEditor.Blur()
+			m.subFocus = false
 			if m.activePanel == panelRequest {
 				m.urlInput.Focus()
 			}
@@ -208,16 +282,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			if m.activePanel == panelRequest && !m.subFocus {
+				if m.activeTab != 2 {
+					m.subFocus = true
+					m.urlInput.Blur()
+					switch m.activeTab {
+					case 0:
+						m.headers.Focus()
+					case 1:
+						m.bodyEditor.Focus()
+					case 3:
+						m.params.Focus()
+					}
+					m.statusMsg = "Tab/S-Tab cycles fields, Esc to exit editor"
+					return m, nil
+				}
+			}
+		case "esc":
+			if m.activePanel == panelRequest && m.subFocus {
+				m.subFocus = false
+				m.urlInput.Focus()
+				m.headers.Blur()
+				m.params.Blur()
+				m.bodyEditor.Blur()
+				m.statusMsg = "Exited editor"
+				return m, nil
+			}
 		}
 
-		// Panel-specific keys
 		switch m.activePanel {
 		case panelSidebar:
 			return m.handleSidebarKey(msg)
-
 		case panelRequest:
 			return m.handleRequestKey(msg)
-
 		case panelResponse:
 			return m.handleResponseKey(msg)
 		}
@@ -232,7 +329,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.response = msg.resp
 			m.respErr = nil
 			m.showResp = true
-			m.respView.SetContent(msg.resp.Body)
+			colored := highlightJSON(msg.resp.Body)
+			m.respView.SetContent(colored)
 			m.respView.GotoTop()
 			m.statusMsg = fmt.Sprintf("%d %s — %v — %d bytes",
 				msg.resp.StatusCode, msg.resp.Status,
@@ -243,7 +341,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	return m, tea.Batch(cmds...)
+	return m, nil
 }
 
 func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -251,7 +349,6 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.sidebarSel > 0 {
 			m.sidebarSel--
-			// Adjust scroll
 			if m.sidebarSel < m.sidebarOff {
 				m.sidebarOff = m.sidebarSel
 			}
@@ -269,12 +366,77 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleRequestKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.subFocus {
+		switch msg.String() {
+		case "ctrl+r", "ctrl+enter":
+			if !m.sending {
+				m.sending = true
+				m.statusMsg = "Sending request..."
+				return m, func() tea.Msg { return m.doRequest() }
+			}
+			return m, nil
+		case "esc":
+			m.subFocus = false
+			m.urlInput.Focus()
+			m.headers.Blur()
+			m.params.Blur()
+			m.bodyEditor.Blur()
+			m.statusMsg = "Exited editor"
+			return m, nil
+		}
+
+		switch m.activeTab {
+		case 0:
+			m.headers.HandleKey(msg)
+		case 1:
+			var cmd tea.Cmd
+			m.bodyEditor, cmd = m.bodyEditor.Update(msg)
+			_ = cmd
+		case 3:
+			m.params.HandleKey(msg)
+		}
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "ctrl+r", "ctrl+enter":
 		if !m.sending {
 			m.sending = true
 			m.statusMsg = "Sending request..."
 			return m, func() tea.Msg { return m.doRequest() }
+		}
+		return m, nil
+
+	case "tab", "shift+tab":
+		if m.activeTab == 1 || m.activeTab == 2 {
+			break
+		}
+		m.subFocus = true
+		m.urlInput.Blur()
+		switch m.activeTab {
+		case 0:
+			m.headers.Focus()
+			m.headers.HandleKey(msg)
+		case 3:
+			m.params.Focus()
+			m.params.HandleKey(msg)
+		}
+		m.statusMsg = "Tab/S-Tab cycles fields, Esc to exit"
+		return m, nil
+
+	case "enter":
+		if m.activeTab != 2 {
+			m.subFocus = true
+			m.urlInput.Blur()
+			switch m.activeTab {
+			case 0:
+				m.headers.Focus()
+			case 1:
+				m.bodyEditor.Focus()
+			case 3:
+				m.params.Focus()
+			}
+			m.statusMsg = "Tab/S-Tab cycles fields, Esc to exit"
 		}
 		return m, nil
 
@@ -291,7 +453,6 @@ func (m Model) handleRequestKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "up", "down":
-		// Change method with up/down when in request panel
 		if msg.String() == "up" {
 			m.methodIndex = (m.methodIndex - 1 + len(methods)) % len(methods)
 		} else {
@@ -300,7 +461,6 @@ func (m Model) handleRequestKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// URL input gets the key
 	var cmd tea.Cmd
 	m.urlInput, cmd = m.urlInput.Update(msg)
 	return m, cmd
@@ -329,34 +489,13 @@ func (m Model) View() string {
 		return "Loading..."
 	}
 
-	reqHeight := m.height/2 - 2
-	respHeight := m.height/2 - 2
-	if reqHeight < 5 {
-		reqHeight = 5
-	}
-	if respHeight < 5 {
-		respHeight = 5
-	}
-
-	sidebarView := m.renderSidebar(reqHeight + respHeight + statusBarH + 1)
+	sidebarView := m.renderSidebar(m.height - 2)
 	requestView := m.renderRequest()
 	responseView := m.renderResponse()
 	statusView := m.renderStatusBar()
 
-	rightSide := lipgloss.JoinVertical(
-		lipgloss.Top,
-		requestView,
-		statusView,
-		responseView,
-	)
-
-	mainContent := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		sidebarView,
-		rightSide,
-	)
-
-	return mainContent
+	rightSide := lipgloss.JoinVertical(lipgloss.Top, requestView, statusView, responseView)
+	return lipgloss.JoinHorizontal(lipgloss.Top, sidebarView, rightSide)
 }
 
 func (m Model) renderSidebar(height int) string {
@@ -394,7 +533,6 @@ func (m Model) renderSidebar(height int) string {
 		} else {
 			meth := methodStyle(item.method).Render(item.method)
 			display := item.name
-			// truncate long names
 			if len(display) > 16 {
 				display = display[:14] + ".."
 			}
@@ -408,9 +546,7 @@ func (m Model) renderSidebar(height int) string {
 	}
 
 	content := lipgloss.NewStyle().Width(22).Render(strings.Join(items, "\n"))
-	return style.Height(height).Render(
-		titleStyle.Render("Collections") + "\n" + content,
-	)
+	return style.Height(height).Render(titleStyle.Render("Collections") + "\n" + content)
 }
 
 func (m Model) renderRequest() string {
@@ -419,24 +555,17 @@ func (m Model) renderRequest() string {
 		style = focusedPanelBorder
 	}
 
-	// Method selector + URL
 	methodLabel := methods[m.methodIndex]
 	methodBadge := methodStyle(methodLabel).Render(" " + methodLabel + " ")
-
-	// URL input
 	urlView := m.urlInput.View()
-
-	// Method picker indicator
 	methodPicker := lipgloss.NewStyle().Foreground(muted).Render("(↑↓ method)")
 
-	topBar := lipgloss.JoinHorizontal(
-		lipgloss.Center,
+	topBar := lipgloss.JoinHorizontal(lipgloss.Center,
 		methodBadge, lipgloss.NewStyle().Width(1).Render(""),
 		urlView, lipgloss.NewStyle().Width(1).Render(""),
 		methodPicker,
 	)
 
-	// Tabs
 	var tabsView []string
 	for i, tab := range m.tabs {
 		if i == m.activeTab {
@@ -447,7 +576,6 @@ func (m Model) renderRequest() string {
 	}
 	tabsRow := lipgloss.JoinHorizontal(lipgloss.Left, tabsView...)
 
-	// Tab content (placeholder for now)
 	tabContent := ""
 	switch m.activeTab {
 	case 0:
@@ -460,18 +588,16 @@ func (m Model) renderRequest() string {
 		tabContent = m.renderParams()
 	}
 
-	// Send button
-	sendBtn := "[Ctrl+Enter: Send]"
+	sendBtn := "[Ctrl+R: Send]"
 	if m.sending {
-		sendBtn = "Sending..."
+		sendBtn = "Sending...  "
+		if time.Now().UnixMilli()%2000 < 1000 {
+			sendBtn = "Sending... "
+		}
 	}
-	sendStyle := lipgloss.NewStyle().
-		Foreground(primary).
-		Bold(true).
-		Padding(0, 1)
+	sendStyle := lipgloss.NewStyle().Foreground(primary).Bold(true).Padding(0, 1)
 
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
+	content := lipgloss.JoinVertical(lipgloss.Left,
 		topBar,
 		lipgloss.NewStyle().Height(1).Render(""),
 		tabsRow,
@@ -479,7 +605,6 @@ func (m Model) renderRequest() string {
 		lipgloss.NewStyle().Height(1).Render(""),
 		sendStyle.Render(sendBtn),
 	)
-
 	return style.Render(content)
 }
 
@@ -488,23 +613,48 @@ func (m Model) renderHeaders() string {
 	if h < 3 {
 		h = 3
 	}
-	return lipgloss.NewStyle().
-		Height(h).
-		Padding(0, 2).
-		Foreground(muted).
-		Render("Headers editor coming in Phase 2\n\nFor now, headers are sent automatically.\nContent-Type: application/json will be added\nfor requests with body.")
+	if !m.subFocus || m.activeTab != 0 {
+		return lipgloss.NewStyle().Height(h).Padding(0, 1).Render(
+			m.headers.View(h),
+		)
+	}
+	return lipgloss.NewStyle().Height(h).Padding(0, 1).Render(m.headers.View(h))
 }
 
 func (m Model) renderBody() string {
-	h := m.requestPanelHeight() - 7
+	h := m.requestPanelHeight() - 8
 	if h < 3 {
 		h = 3
 	}
-	return lipgloss.NewStyle().
-		Height(h).
-		Padding(0, 2).
-		Foreground(muted).
-		Render("Body editor coming in Phase 2\n\nSupports: none, form-data,\nx-www-form-urlencoded, JSON, raw")
+
+	var subTabs []string
+	for i, bt := range bodyTypes {
+		if i == m.bodyType {
+			subTabs = append(subTabs, activeTabStyle.Render(bt))
+		} else {
+			subTabs = append(subTabs, inactiveTabStyle.Render(bt))
+		}
+	}
+	subRow := lipgloss.JoinHorizontal(lipgloss.Left, subTabs...)
+
+	var editorView string
+	switch m.bodyType {
+	case 0:
+		editorView = lipgloss.NewStyle().Height(h).Padding(0, 2).Foreground(muted).
+			Render("No body. Select JSON or raw above.")
+	case 1, 2:
+		m.bodyEditor.SetHeight(h - 4)
+		if h-4 < 2 {
+			m.bodyEditor.SetHeight(2)
+		}
+		editorView = m.bodyEditor.View()
+	case 3:
+		editorView = "Form-data editor (coming soon)"
+	case 4:
+		editorView = "URL-encoded editor (coming soon)"
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, subRow, editorView)
 }
 
 func (m Model) renderAuth() string {
@@ -512,11 +662,10 @@ func (m Model) renderAuth() string {
 	if h < 3 {
 		h = 3
 	}
-	return lipgloss.NewStyle().
-		Height(h).
-		Padding(0, 2).
-		Foreground(muted).
-		Render("Auth helpers coming in Phase 4\n\nSupports: None, Basic, Bearer Token,\nAPI Key, OAuth 2.0")
+	return lipgloss.NewStyle().Height(h).Padding(0, 2).Foreground(muted).
+		Render("Auth helpers coming in Phase 4" + "\n\n" +
+			"Supports: None, Basic, Bearer Token," + "\n" +
+			"API Key, OAuth 2.0")
 }
 
 func (m Model) renderParams() string {
@@ -524,11 +673,7 @@ func (m Model) renderParams() string {
 	if h < 3 {
 		h = 3
 	}
-	return lipgloss.NewStyle().
-		Height(h).
-		Padding(0, 2).
-		Foreground(muted).
-		Render("Query Params editor coming in Phase 4\n\nKey-value pairs that update the URL query string.")
+	return lipgloss.NewStyle().Height(h).Padding(0, 1).Render(m.params.View(h))
 }
 
 func (m Model) renderResponse() string {
@@ -542,7 +687,7 @@ func (m Model) renderResponse() string {
 			Foreground(muted).
 			Width(m.width - sidebarWidth - 6).
 			Height(m.responsePanelHeight() - 2).
-			Render("Send a request to see the response here" + "\n\n" + "Try: Ctrl+Enter")
+			Render("Send a request to see the response here" + "\n\n" + "Try: Ctrl+R")
 		return style.Render(msg)
 	}
 
@@ -559,7 +704,6 @@ func (m Model) renderResponse() string {
 		return style.Render("")
 	}
 
-	// Response header bar
 	statusText := statusColor(m.response.StatusCode).Render(
 		fmt.Sprintf("%d %s", m.response.StatusCode, m.response.Status),
 	)
@@ -570,7 +714,6 @@ func (m Model) renderResponse() string {
 		),
 	)
 
-	// Response headers collapsible (show first few)
 	headerLines := strings.Split(m.response.HeaderStr, "\n")
 	headerPreview := ""
 	maxHeaderLines := 4
@@ -587,16 +730,13 @@ func (m Model) renderResponse() string {
 		}
 	}
 
-	// Body
 	bodyView := m.respView.View()
 
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
+	content := lipgloss.JoinVertical(lipgloss.Left,
 		statusText+"  "+infoText,
 		headerPreview,
 		bodyView,
 	)
-
 	return style.Render(content)
 }
 
@@ -614,10 +754,8 @@ func (m Model) renderStatusBar() string {
 	if barWidth < 10 {
 		barWidth = 10
 	}
-	// Truncate if needed
 	if len(statusText) > barWidth-2 {
 		statusText = statusText[:barWidth-5] + "..."
 	}
-
 	return statusBarStyle.Width(barWidth).Render(statusText)
 }
