@@ -3,18 +3,16 @@ package tui
 import (
 	"curlmoon/internal/collection"
 	"testing"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
-func TestNewModelWithStore_SeedsDefaultCollections(t *testing.T) {
+func TestNewAppWithStore_SeedsDefaultCollections(t *testing.T) {
 	store := collection.NewStore(t.TempDir())
-	m := NewModelWithStore(store)
+	a := NewAppWithStore(store)
 
-	if len(m.collections) != 3 {
-		t.Fatalf("expected 3 seeded collections, got %d", len(m.collections))
+	if len(a.collections) != 3 {
+		t.Fatalf("expected 3 seeded collections, got %d", len(a.collections))
 	}
-	if len(m.sidebar) == 0 {
+	if len(a.sidebar) == 0 {
 		t.Fatal("expected sidebar to be populated from collections")
 	}
 
@@ -27,53 +25,47 @@ func TestNewModelWithStore_SeedsDefaultCollections(t *testing.T) {
 	}
 }
 
-func TestNewModelWithStore_LoadsExistingCollections(t *testing.T) {
+func TestNewAppWithStore_LoadsExistingCollections(t *testing.T) {
 	store := collection.NewStore(t.TempDir())
 	c, _ := store.Create("My Stuff")
 	c.AddItemAt(nil, collection.NewRequestItem("Ping", "GET", "https://example.com/ping", nil, "", ""))
 	store.Save(c)
 
-	m := NewModelWithStore(store)
+	a := NewAppWithStore(store)
 
-	if len(m.collections) != 1 {
-		t.Fatalf("expected the pre-existing collection to be loaded, got %d", len(m.collections))
+	if len(a.collections) != 1 {
+		t.Fatalf("expected the pre-existing collection to be loaded, got %d", len(a.collections))
 	}
 
 	var found bool
-	for _, e := range m.sidebar {
+	for _, e := range a.sidebar {
 		if e.name == "Ping" && e.url == "https://example.com/ping" {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("expected sidebar to contain the loaded request, got %+v", m.sidebar)
+		t.Errorf("expected sidebar to contain the loaded request, got %+v", a.sidebar)
 	}
 }
 
 func TestSidebar_CreateCollection(t *testing.T) {
 	store := collection.NewStore(t.TempDir())
-	m := NewModelWithStore(store)
-	m.activePanel = panelSidebar
-	before := len(m.collections)
+	a := NewAppWithStore(store)
+	before := len(a.collections)
 
-	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
-	m2 := result.(Model)
-	if m2.promptMode != "newCollection" {
-		t.Fatalf("expected newCollection prompt, got %q", m2.promptMode)
+	a.StartPrompt("newCollection", sidebarEntry{}, "")
+	if a.promptMode != "newCollection" {
+		t.Fatalf("expected newCollection prompt, got %q", a.promptMode)
 	}
 
-	for _, r := range "Team Alpha" {
-		result, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		m2 = result.(Model)
-	}
-	result, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m3 := result.(Model)
+	a.promptText = "Team Alpha"
+	a.ConfirmPrompt()
 
-	if m3.promptMode != "" {
-		t.Errorf("expected prompt to close after Enter, got %q", m3.promptMode)
+	if a.promptMode != "" {
+		t.Errorf("expected prompt to close after confirm, got %q", a.promptMode)
 	}
-	if len(m3.collections) != before+1 {
-		t.Fatalf("expected a new collection to be added, got %d", len(m3.collections))
+	if len(a.collections) != before+1 {
+		t.Fatalf("expected a new collection to be added, got %d", len(a.collections))
 	}
 
 	names, _ := store.List()
@@ -90,60 +82,46 @@ func TestSidebar_CreateCollection(t *testing.T) {
 
 func TestSidebar_SaveRequestIntoCollection(t *testing.T) {
 	store := collection.NewStore(t.TempDir())
-	m := NewModelWithStore(store)
-	m = m.initLayout(100, 30)
-	m.urlInput.SetValue("https://example.com/save-me")
-	m.activePanel = panelSidebar
-	m.sidebarSel = 0 // first entry is a collection root
+	a := NewAppWithStore(store)
+	a.urlValue = "https://example.com/save-me"
+	a.sidebarSel = 0 // first entry is a collection root
 
-	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
-	m2 := result.(Model)
-	if m2.promptMode != "newRequest" {
-		t.Fatalf("expected newRequest prompt, got %q", m2.promptMode)
+	a.StartPrompt("newRequest", sidebarEntry{collIdx: a.sidebar[a.sidebarSel].collIdx}, "")
+	if a.promptMode != "newRequest" {
+		t.Fatalf("expected newRequest prompt, got %q", a.promptMode)
 	}
 
-	for _, r := range "Saved Req" {
-		result, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		m2 = result.(Model)
-	}
-	result, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m3 := result.(Model)
+	a.promptText = "Saved Req"
+	a.ConfirmPrompt()
 
 	var found bool
-	for _, e := range m3.sidebar {
+	for _, e := range a.sidebar {
 		if e.name == "Saved Req" && e.url == "https://example.com/save-me" {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("expected saved request to appear in sidebar, got %+v", m3.sidebar)
+		t.Errorf("expected saved request to appear in sidebar, got %+v", a.sidebar)
 	}
 }
 
 func TestSidebar_RenameCollection(t *testing.T) {
 	store := collection.NewStore(t.TempDir())
 	store.Create("Old Name")
-	m := NewModelWithStore(store)
-	m.activePanel = panelSidebar
-	m.sidebarSel = 0
+	a := NewAppWithStore(store)
+	a.sidebarSel = 0
 
-	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
-	m2 := result.(Model)
-	if m2.promptMode != "rename" {
-		t.Fatalf("expected rename prompt, got %q", m2.promptMode)
+	sel := a.sidebar[a.sidebarSel]
+	a.StartPrompt("rename", sel, sel.name)
+	if a.promptMode != "rename" {
+		t.Fatalf("expected rename prompt, got %q", a.promptMode)
 	}
 
-	// clear the prefilled name, then type a new one
-	m2.promptInput.SetValue("")
-	for _, r := range "New Name" {
-		result, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		m2 = result.(Model)
-	}
-	result, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m3 := result.(Model)
+	a.promptText = "New Name"
+	a.ConfirmPrompt()
 
-	if m3.collections[0].Info.Name != "New Name" {
-		t.Errorf("expected renamed collection, got %q", m3.collections[0].Info.Name)
+	if a.collections[0].Info.Name != "New Name" {
+		t.Errorf("expected renamed collection, got %q", a.collections[0].Info.Name)
 	}
 	if _, err := store.Load("Old Name"); err == nil {
 		t.Error("expected old collection file to be gone")
@@ -153,21 +131,19 @@ func TestSidebar_RenameCollection(t *testing.T) {
 func TestSidebar_DeleteCollectionWithConfirm(t *testing.T) {
 	store := collection.NewStore(t.TempDir())
 	store.Create("Doomed")
-	m := NewModelWithStore(store)
-	m.activePanel = panelSidebar
-	m.sidebarSel = 0
+	a := NewAppWithStore(store)
+	a.sidebarSel = 0
 
-	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
-	m2 := result.(Model)
-	if m2.promptMode != "confirmDelete" {
-		t.Fatalf("expected confirmDelete prompt, got %q", m2.promptMode)
+	sel := a.sidebar[a.sidebarSel]
+	a.StartPrompt("confirmDelete", sel, "")
+	if a.promptMode != "confirmDelete" {
+		t.Fatalf("expected confirmDelete prompt, got %q", a.promptMode)
 	}
 
-	result, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
-	m3 := result.(Model)
+	a.ConfirmPrompt()
 
-	if len(m3.collections) != 0 {
-		t.Errorf("expected collection removed from model, got %d", len(m3.collections))
+	if len(a.collections) != 0 {
+		t.Errorf("expected collection removed from model, got %d", len(a.collections))
 	}
 	if _, err := store.Load("Doomed"); err == nil {
 		t.Error("expected collection file deleted from disk")
@@ -177,50 +153,47 @@ func TestSidebar_DeleteCollectionWithConfirm(t *testing.T) {
 func TestSidebar_DeleteCollectionCancelled(t *testing.T) {
 	store := collection.NewStore(t.TempDir())
 	store.Create("Safe")
-	m := NewModelWithStore(store)
-	m.activePanel = panelSidebar
-	m.sidebarSel = 0
+	a := NewAppWithStore(store)
+	a.sidebarSel = 0
 
-	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
-	m2 := result.(Model)
+	sel := a.sidebar[a.sidebarSel]
+	a.StartPrompt("confirmDelete", sel, "")
+	a.CancelPrompt()
 
-	result, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
-	m3 := result.(Model)
-
-	if len(m3.collections) != 1 {
-		t.Errorf("expected collection preserved after cancel, got %d", len(m3.collections))
+	if len(a.collections) != 1 {
+		t.Errorf("expected collection preserved after cancel, got %d", len(a.collections))
 	}
 	if _, err := store.Load("Safe"); err != nil {
 		t.Errorf("expected collection file preserved, got %v", err)
 	}
 }
 
-func TestSessionRoundTrip_ThroughModel(t *testing.T) {
+func TestSessionRoundTrip_ThroughApp(t *testing.T) {
 	store := collection.NewStore(t.TempDir())
-	m := NewModelWithStore(store)
-	m.urlInput.SetValue("https://example.com/session")
-	m.methodIndex = 1 // POST
-	m.bodyType = 1     // JSON
-	m.bodyEditor.SetValue(`{"x":1}`)
-	m.headers.Rows[0].key.SetValue("X-Test")
-	m.headers.Rows[0].value.SetValue("abc")
+	a := NewAppWithStore(store)
+	a.urlValue = "https://example.com/session"
+	a.methodIndex = 1 // POST
+	a.bodyType = 1    // JSON
+	a.bodyText = `{"x":1}`
+	a.headersText = "X-Test: abc"
 
-	m.saveSession()
+	a.saveSession()
 
-	m2 := NewModelWithStore(store)
-	if m2.urlInput.Value() != "https://example.com/session" {
-		t.Errorf("expected URL restored, got %s", m2.urlInput.Value())
+	a2 := NewAppWithStore(store)
+	if a2.urlValue != "https://example.com/session" {
+		t.Errorf("expected URL restored, got %s", a2.urlValue)
 	}
-	if m2.methodIndex != 1 {
-		t.Errorf("expected method restored, got %d", m2.methodIndex)
+	if a2.methodIndex != 1 {
+		t.Errorf("expected method restored, got %d", a2.methodIndex)
 	}
-	if m2.bodyType != 1 {
-		t.Errorf("expected bodyType restored, got %d", m2.bodyType)
+	if a2.bodyType != 1 {
+		t.Errorf("expected bodyType restored, got %d", a2.bodyType)
 	}
-	if m2.bodyEditor.Value() != `{"x":1}` {
-		t.Errorf("expected body restored, got %s", m2.bodyEditor.Value())
+	if a2.bodyText != `{"x":1}` {
+		t.Errorf("expected body restored, got %s", a2.bodyText)
 	}
-	if m2.headers.Rows[0].key.Value() != "X-Test" {
-		t.Errorf("expected header restored, got %s", m2.headers.Rows[0].key.Value())
+	pairs := parseKV(a2.headersText)
+	if len(pairs) != 1 || pairs[0].Key != "X-Test" || pairs[0].Value != "abc" {
+		t.Errorf("expected header restored, got %+v", pairs)
 	}
 }

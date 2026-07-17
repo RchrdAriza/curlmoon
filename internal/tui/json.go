@@ -3,16 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-)
-
-var (
-	jsonKeyStyle   = lipgloss.NewStyle().Foreground(primary)
-	jsonStrStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF7F"))
-	jsonNumStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFA500"))
-	jsonBoolStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#BA55D3"))
-	jsonNullStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	jsonPunctStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#E0E0E0"))
+	"github.com/jesseduffield/gocui"
 )
 
 func highlightJSON(text string) string {
@@ -41,9 +32,9 @@ func highlightJSON(text string) string {
 			}
 			str := text[i:j]
 			if j < len(text) && text[j] == ':' {
-				out.WriteString(jsonKeyStyle.Render(str))
+				out.WriteString(ansiWrap(str, colorPrimary, false))
 			} else {
-				out.WriteString(jsonStrStyle.Render(str))
+				out.WriteString(ansiWrap(str, colorSuccess, false))
 			}
 			i = j
 
@@ -52,21 +43,21 @@ func highlightJSON(text string) string {
 			for j < len(text) && (text[j] >= '0' && text[j] <= '9' || text[j] == '.' || text[j] == '-' || text[j] == 'e' || text[j] == 'E' || text[j] == '+') {
 				j++
 			}
-			out.WriteString(jsonNumStyle.Render(text[i:j]))
+			out.WriteString(ansiWrap(text[i:j], colorSecondary, false))
 			i = j
 
 		case strings.HasPrefix(strings.ToLower(text[i:]), "true"):
-			out.WriteString(jsonBoolStyle.Render("true"))
+			out.WriteString(ansiWrap("true", colorMagenta, false))
 			i += 4
 		case strings.HasPrefix(strings.ToLower(text[i:]), "false"):
-			out.WriteString(jsonBoolStyle.Render("false"))
+			out.WriteString(ansiWrap("false", colorMagenta, false))
 			i += 5
 		case strings.HasPrefix(strings.ToLower(text[i:]), "null"):
-			out.WriteString(jsonNullStyle.Render("null"))
+			out.WriteString(ansiWrap("null", colorMuted, false))
 			i += 4
 
 		case ch == '{' || ch == '}' || ch == '[' || ch == ']' || ch == ',' || ch == ':':
-			out.WriteString(jsonPunctStyle.Render(string(ch)))
+			out.WriteString(ansiWrap(string(ch), gocui.ColorWhite, false))
 			i++
 
 		default:

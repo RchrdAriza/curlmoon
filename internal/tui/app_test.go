@@ -3,257 +3,243 @@ package tui
 import (
 	"strings"
 	"testing"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
-func TestNewModel(t *testing.T) {
-	m := NewModel()
-	if m.activePanel != panelRequest {
-		t.Errorf("expected activePanel=%d, got %d", panelRequest, m.activePanel)
+func TestNewApp(t *testing.T) {
+	a := NewApp()
+	if a.activePanel != panelURL {
+		t.Errorf("expected activePanel=%s, got %s", panelURL, a.activePanel)
 	}
-	if m.methodIndex != 0 {
-		t.Errorf("expected methodIndex=0 (GET), got %d", m.methodIndex)
+	if a.methodIndex != 0 {
+		t.Errorf("expected methodIndex=0 (GET), got %d", a.methodIndex)
 	}
-	if m.urlInput.Placeholder != "https://httpbin.org/get" {
-		t.Errorf("unexpected placeholder: %s", m.urlInput.Placeholder)
-	}
-	if len(m.sidebar) == 0 {
+	if len(a.sidebar) == 0 {
 		t.Error("expected sidebar to have items")
 	}
 }
 
-func TestModelInit(t *testing.T) {
-	m := NewModel()
-	cmd := m.Init()
-	if cmd == nil {
-		t.Error("expected Init to return a command")
+func TestAppCycleMethod(t *testing.T) {
+	a := NewApp()
+	a.CycleMethod(1)
+	if a.methodIndex != 1 {
+		t.Errorf("expected methodIndex=1 (POST), got %d", a.methodIndex)
+	}
+	a.CycleMethod(-1)
+	if a.methodIndex != 0 {
+		t.Errorf("expected methodIndex=0 (GET), got %d", a.methodIndex)
+	}
+	a.CycleMethod(-1)
+	if a.methodIndex != len(methods)-1 {
+		t.Errorf("expected wrap to last method, got %d", a.methodIndex)
 	}
 }
 
-func TestModelWindowResize(t *testing.T) {
-	m := NewModel()
-	msg := tea.WindowSizeMsg{Width: 100, Height: 30}
-	result, cmd := m.Update(msg)
-	if cmd != nil {
-		t.Error("expected no command from resize")
+func TestAppTabNavigation(t *testing.T) {
+	a := NewApp()
+	a.NextTab()
+	if a.activeTab != tabBody {
+		t.Errorf("expected activeTab=%d, got %d", tabBody, a.activeTab)
 	}
-	updated := result.(Model)
-	if updated.width != 100 {
-		t.Errorf("expected width=100, got %d", updated.width)
+	a.PrevTab()
+	if a.activeTab != tabHeaders {
+		t.Errorf("expected activeTab=%d, got %d", tabHeaders, a.activeTab)
 	}
-	if updated.height != 30 {
-		t.Errorf("expected height=30, got %d", updated.height)
-	}
-	if !updated.ready {
-		t.Error("expected ready=true after resize")
+	// Doesn't wrap past the ends.
+	a.PrevTab()
+	if a.activeTab != tabHeaders {
+		t.Errorf("expected activeTab to stay at %d, got %d", tabHeaders, a.activeTab)
 	}
 }
 
-func TestModelFocusChange(t *testing.T) {
-	m := NewModel()
-	if m.activePanel != panelRequest {
-		t.Errorf("expected focus on request, got %d", m.activePanel)
+func TestAppSidebarNavigation(t *testing.T) {
+	a := NewApp()
+	a.MoveSidebarSel(1, 100)
+	if a.sidebarSel != 1 {
+		t.Errorf("expected sidebarSel=1 after down, got %d", a.sidebarSel)
 	}
-
-	// Tab: request(1) -> response(2) -> sidebar(0) -> request(1)
-	msg := tea.KeyMsg{Type: tea.KeyTab}
-	result, _ := m.Update(msg)
-	updated := result.(Model)
-	if updated.activePanel != panelResponse {
-		t.Errorf("expected focus on response (2) after tab, got %d", updated.activePanel)
+	a.MoveSidebarSel(-1, 100)
+	if a.sidebarSel != 0 {
+		t.Errorf("expected sidebarSel=0 after up, got %d", a.sidebarSel)
 	}
-
-	result, _ = updated.Update(msg)
-	updated = result.(Model)
-	if updated.activePanel != panelSidebar {
-		t.Errorf("expected focus on sidebar (0) after tab, got %d", updated.activePanel)
-	}
-
-	result, _ = updated.Update(msg)
-	updated = result.(Model)
-	if updated.activePanel != panelRequest {
-		t.Errorf("expected focus on request (1) after tab, got %d", updated.activePanel)
+	a.MoveSidebarSel(-1, 100)
+	if a.sidebarSel != 0 {
+		t.Error("expected sidebarSel to stay at 0 when already at top")
 	}
 }
 
-func TestModelSidebarNavigation(t *testing.T) {
-	m := NewModel()
-	m.activePanel = panelSidebar
-	m.width = 100
-	m.height = 30
-
-	// Navigate down
-	msg := tea.KeyMsg{Type: tea.KeyDown}
-	result, _ := m.Update(msg)
-	updated := result.(Model)
-	if updated.sidebarSel != 1 {
-		t.Errorf("expected sidebarSel=1 after down, got %d", updated.sidebarSel)
+func TestAppSidebarSelectItem(t *testing.T) {
+	a := NewApp()
+	a.sidebarSel = 1 // "GET /get"
+	if !a.SelectSidebarEntry() {
+		t.Fatal("expected a request entry to be selected")
 	}
-
-	// Navigate up
-	msg = tea.KeyMsg{Type: tea.KeyUp}
-	result, _ = updated.Update(msg)
-	updated = result.(Model)
-	if updated.sidebarSel != 0 {
-		t.Errorf("expected sidebarSel=0 after up, got %d", updated.sidebarSel)
+	if a.activePanel != panelURL {
+		t.Errorf("expected focus to switch to url panel, got %s", a.activePanel)
+	}
+	if a.urlValue != "https://httpbin.org/get" {
+		t.Errorf("expected URL to be httpbin.org/get, got %s", a.urlValue)
 	}
 }
 
-func TestModelMethodChange(t *testing.T) {
-	m := NewModel()
-	m.activePanel = panelRequest
-	m.width = 100
-	m.height = 30
-
-	// Down changes method POST
-	msg := tea.KeyMsg{Type: tea.KeyDown}
-	result, _ := m.Update(msg)
-	updated := result.(Model)
-	if updated.methodIndex != 1 {
-		t.Errorf("expected methodIndex=1 (POST), got %d", updated.methodIndex)
-	}
-
-	// Up goes back to GET
-	msg = tea.KeyMsg{Type: tea.KeyUp}
-	result, _ = updated.Update(msg)
-	updated = result.(Model)
-	if updated.methodIndex != 0 {
-		t.Errorf("expected methodIndex=0 (GET), got %d", updated.methodIndex)
+func TestAppSidebarSelectFolder(t *testing.T) {
+	a := NewApp()
+	a.sidebarSel = 0 // "httpbin.org" folder
+	if a.SelectSidebarEntry() {
+		t.Error("expected selecting a folder to be a no-op")
 	}
 }
 
-func TestModelTabNavigation(t *testing.T) {
-	m := NewModel()
-	m.activePanel = panelRequest
-	m.width = 100
-	m.height = 30
-
-	// Right arrow to move to Body tab
-	msg := tea.KeyMsg{Type: tea.KeyRight}
-	result, _ := m.Update(msg)
-	updated := result.(Model)
-	if updated.activeTab != 1 {
-		t.Errorf("expected activeTab=1, got %d", updated.activeTab)
+func TestAppEnterExitContentEditor(t *testing.T) {
+	a := NewApp()
+	a.activeTab = tabHeaders
+	if a.subFocus {
+		t.Error("expected subFocus=false initially")
 	}
-
-	// Left arrow back to Headers
-	msg = tea.KeyMsg{Type: tea.KeyLeft}
-	result, _ = updated.Update(msg)
-	updated = result.(Model)
-	if updated.activeTab != 0 {
-		t.Errorf("expected activeTab=0, got %d", updated.activeTab)
+	if !a.EnterContentEditor() {
+		t.Fatal("expected EnterContentEditor to succeed on Headers tab")
+	}
+	if !a.subFocus {
+		t.Error("expected subFocus=true after EnterContentEditor")
+	}
+	a.ExitContentEditor()
+	if a.subFocus {
+		t.Error("expected subFocus=false after ExitContentEditor")
 	}
 }
 
-func TestModelViewNotEmpty(t *testing.T) {
-	m := NewModel()
-	m.width = 100
-	m.height = 30
-	m.ready = true
-
-	view := m.View()
-	if len(view) == 0 {
-		t.Error("expected non-empty view")
+func TestAppEnterContentEditor_AuthTabBlocked(t *testing.T) {
+	a := NewApp()
+	a.activeTab = tabAuth
+	if a.EnterContentEditor() {
+		t.Error("expected EnterContentEditor to be blocked on Auth tab")
 	}
-	if !strings.Contains(view, "Collections") {
-		t.Error("expected 'Collections' in sidebar")
-	}
-	if !strings.Contains(view, "GET") {
-		t.Error("expected method badge in view")
+	if a.subFocus {
+		t.Error("expected subFocus to remain false")
 	}
 }
 
-func TestModelURLInput(t *testing.T) {
-	m := NewModel()
-	m.activePanel = panelRequest
-	m.width = 100
-	m.height = 30
-
-	// Simulate typing a URL
-	for _, ch := range "https://example.com/api" {
-		msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}}
-		result, _ := m.Update(msg)
-		m = result.(Model)
-	}
-
-	if m.urlInput.Value() != "https://example.com/api" {
-		t.Errorf("expected URL to be set, got %s", m.urlInput.Value())
+func TestBuildURL_NoParams(t *testing.T) {
+	a := NewApp()
+	a.urlValue = "https://httpbin.org/get"
+	if got := a.buildURL(); got != "https://httpbin.org/get" {
+		t.Errorf("expected unchanged URL, got %s", got)
 	}
 }
 
-func TestModelSendRequest(t *testing.T) {
-	m := NewModel()
-	m.activePanel = panelRequest
-	m.width = 100
-	m.height = 30
-	m.urlInput.SetValue("https://httpbin.org/get")
+func TestBuildURL_WithParams(t *testing.T) {
+	a := NewApp()
+	a.urlValue = "https://httpbin.org/get"
+	a.paramsText = "name: test"
 
-	msg := tea.KeyMsg{Type: tea.KeyCtrlR}
-	result, _ := m.Update(msg)
-	updated := result.(Model)
-
-	if !updated.sending {
-		t.Error("expected sending=true after Ctrl+R")
+	got := a.buildURL()
+	if !strings.Contains(got, "name=test") {
+		t.Errorf("expected name=test in URL, got %s", got)
 	}
-	if !strings.Contains(updated.statusMsg, "Sending") {
-		t.Error("expected statusMsg to show sending")
+	if !strings.Contains(got, "?") {
+		t.Errorf("expected ? in URL with params, got %s", got)
 	}
 }
 
-func TestModelSidebarSelectItem(t *testing.T) {
-	m := NewModel()
-	m.activePanel = panelSidebar
-	m.width = 100
-	m.height = 30
+func TestBuildURL_WithExistingQuery(t *testing.T) {
+	a := NewApp()
+	a.urlValue = "https://httpbin.org/get?existing=1"
+	a.paramsText = "page: 2"
 
-	// Select second item (GET /get)
-	m.sidebarSel = 1
-	msg := tea.KeyMsg{Type: tea.KeyEnter}
-	result, _ := m.Update(msg)
-	updated := result.(Model)
-
-	if updated.activePanel != panelRequest {
-		t.Errorf("expected focus to switch to request panel, got %d", updated.activePanel)
+	got := a.buildURL()
+	if !strings.Contains(got, "existing=1") {
+		t.Errorf("expected existing param preserved, got %s", got)
 	}
-	if updated.urlInput.Value() != "https://httpbin.org/get" {
-		t.Errorf("expected URL to be httpbin.org/get, got %s", updated.urlInput.Value())
+	if !strings.Contains(got, "page=2") {
+		t.Errorf("expected page=2 in URL, got %s", got)
+	}
+	if !strings.Contains(got, "&") {
+		t.Errorf("expected & when appending params, got %s", got)
 	}
 }
 
-func TestModelQuit(t *testing.T) {
-	m := NewModel()
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}
-	_, cmd := m.Update(msg)
-
-	if cmd == nil {
-		t.Error("expected quit command for 'q' key")
+func TestBuildHeaders_NoBody(t *testing.T) {
+	a := NewApp()
+	a.bodyType = 0
+	if headers := a.buildHeaders(); len(headers) > 0 {
+		t.Errorf("expected no headers for no body, got %v", headers)
 	}
 }
 
-func TestModelCtrlC(t *testing.T) {
-	m := NewModel()
-	msg := tea.KeyMsg{Type: tea.KeyCtrlC}
-	_, cmd := m.Update(msg)
-
-	if cmd == nil {
-		t.Error("expected quit command for Ctrl+C")
+func TestBuildHeaders_JSONBody(t *testing.T) {
+	a := NewApp()
+	a.bodyType = 1
+	headers := a.buildHeaders()
+	if headers["Content-Type"] != "application/json" {
+		t.Errorf("expected application/json, got %s", headers["Content-Type"])
 	}
 }
 
-func TestModelRendersResponseView(t *testing.T) {
-	m := NewModel()
-	m.width = 100
-	m.height = 30
-	m.ready = true
-	m.showResp = false
-
-	view := m.View()
-	if strings.Contains(view, "Send a request") {
-		// This is expected - no response yet
-	} else {
-		t.Log("View renders correctly without response")
+func TestBuildHeaders_RawBody(t *testing.T) {
+	a := NewApp()
+	a.bodyType = 2
+	headers := a.buildHeaders()
+	if headers["Content-Type"] != "text/plain" {
+		t.Errorf("expected text/plain, got %s", headers["Content-Type"])
 	}
 }
 
+func TestBuildHeaders_UserOverride(t *testing.T) {
+	a := NewApp()
+	a.bodyType = 1
+	a.headersText = "Content-Type: application/vnd.api+json"
+	headers := a.buildHeaders()
+	if headers["Content-Type"] != "application/vnd.api+json" {
+		t.Errorf("expected user override, got %s", headers["Content-Type"])
+	}
+}
 
+func TestBuildHeaders_CustomHeaders(t *testing.T) {
+	a := NewApp()
+	a.headersText = "Authorization: Bearer mytoken"
+	headers := a.buildHeaders()
+	if headers["Authorization"] != "Bearer mytoken" {
+		t.Errorf("expected Bearer mytoken, got %s", headers["Authorization"])
+	}
+}
+
+func TestBuildBody_None(t *testing.T) {
+	a := NewApp()
+	a.bodyType = 0
+	if body := a.buildBody(); body != "" {
+		t.Errorf("expected empty body for type none, got %s", body)
+	}
+}
+
+func TestBuildBody_JSON(t *testing.T) {
+	a := NewApp()
+	a.bodyType = 1
+	a.bodyText = `{"hello":"world"}`
+	if body := a.buildBody(); body != `{"hello":"world"}` {
+		t.Errorf("expected JSON body, got %s", body)
+	}
+}
+
+func TestAppQuitSavesSession(t *testing.T) {
+	// saveSession is a no-op without a store; just verify it doesn't panic.
+	a := NewApp()
+	a.urlValue = "https://example.com"
+	a.saveSession()
+}
+
+func TestAppHandleResponse_Error(t *testing.T) {
+	a := NewApp()
+	a.HandleResponse(nil, errQuoted("boom"))
+	if a.respErr == nil {
+		t.Error("expected respErr to be set")
+	}
+	if a.showResp {
+		t.Error("expected showResp=false on error")
+	}
+	if !strings.Contains(a.statusMsg, "Error") {
+		t.Error("expected statusMsg to mention the error")
+	}
+}
+
+type errQuoted string
+
+func (e errQuoted) Error() string { return string(e) }
