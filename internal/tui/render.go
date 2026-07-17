@@ -16,6 +16,27 @@ func setViewText(v *gocui.View, text string) {
 	fmt.Fprint(v, text)
 }
 
+// setURLText replaces the URL view's content and parks the cursor at the
+// end of it (scrolling the origin so it's visible), matching where you'd
+// want to keep typing after loading a request — gocui otherwise leaves the
+// cursor at (0,0) after a Clear+Write, which put every fresh keystroke at
+// the start of the URL instead of the end.
+func setURLText(v *gocui.View, text string) {
+	setViewText(v, text)
+	n := len([]rune(text))
+	maxX, _ := v.Size()
+	if maxX < 1 {
+		maxX = 1
+	}
+	if n < maxX {
+		_ = v.SetOrigin(0, 0)
+		_ = v.SetCursor(n, 0)
+	} else {
+		_ = v.SetOrigin(n-maxX+1, 0)
+		_ = v.SetCursor(maxX-1, 0)
+	}
+}
+
 func focusTitle(name string, focused bool) string {
 	if focused {
 		return "▸ " + name
@@ -100,11 +121,11 @@ func footerHints(a *App) string {
 	case panelSidebar:
 		return "↑↓/jk navigate  ·  Enter open/toggle  ·  n new  ·  a add request  ·  r rename  ·  d delete  ·  v edit vars  ·  Tab next panel  ·  q quit"
 	case panelURL:
-		return "↑↓ change method  ·  ←→ switch tab  ·  Enter edit content  ·  Ctrl+R send  ·  Tab next panel  ·  Alt+1-4 jump panel"
+		return "←→/Home/End move in URL  ·  ↑↓/Ctrl+K,J method  ·  Ctrl+P,N switch tab  ·  Enter edit content  ·  Ctrl+R send  ·  Tab next panel  ·  Ctrl+S,U,B,E jump panel"
 	case panelResponse:
 		return "↑↓ scroll  ·  PgUp/PgDn page  ·  Tab next panel"
 	}
-	return "Tab cycle panels  ·  Alt+1-4 jump panel  ·  q quit"
+	return "Tab cycle panels  ·  Ctrl+S,U,B,E jump panel  ·  q quit"
 }
 
 func renderStatus(v *gocui.View, a *App) {

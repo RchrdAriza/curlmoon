@@ -18,6 +18,12 @@ func Run(store *collection.Store) error {
 	defer g.Close()
 
 	g.Cursor = true
+	// Without this, gocui puts termbox in "Alt" input mode, where a lone
+	// ESC byte is held back waiting to see if it's the start of an
+	// Alt+<key> combo — so pressing plain Esc (e.g. to cancel the sidebar
+	// prompt) never resolves to KeyEsc at all. InputEsc mode reports it
+	// as KeyEsc whenever it doesn't complete a recognized escape sequence.
+	g.InputEsc = true
 	g.Editor = &appEditor{app: a}
 	g.SetLayout(newLayoutFunc(a))
 

@@ -43,10 +43,16 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		}
 	}
 
-	// jumpToPanel lets Alt+<n> focus a panel directly instead of cycling
-	// through Tab repeatedly, mirroring lazygit's numbered-panel jumps.
-	// Plain digits are reserved for typing (URL/headers/body are text
-	// editors), so this only fires with the Alt modifier.
+	// jumpToPanel lets a shortcut focus a panel directly instead of
+	// cycling through Tab repeatedly, mirroring lazygit's numbered-panel
+	// jumps. These used to be Alt+<n>, but Alt-combo detection and a lone
+	// Esc resolving to KeyEsc are mutually exclusive in termbox (see
+	// g.InputEsc in run.go) — since Esc needs to work to cancel the
+	// sidebar prompt, panel jumps moved to Ctrl+<letter> instead: a raw
+	// single-byte control code every terminal sends identically, so it
+	// doesn't depend on either input mode (same reasoning as the url
+	// panel's Ctrl+J/K/P/N). Plain digits/letters are reserved for typing
+	// (URL/headers/body are text editors), so this needs a modifier.
 	jumpToPanel := func(name string) gocui.KeybindingHandler {
 		return func(g *gocui.Gui, v *gocui.View) error {
 			syncFromViews(g, a)
@@ -61,15 +67,15 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		}
 	}
 	jumpBindings := []struct {
-		ch rune
-		to string
+		key gocui.Key
+		to  string
 	}{
-		{'1', panelSidebar},
-		{'2', panelURL},
-		{'4', panelResponse},
+		{gocui.KeyCtrlS, panelSidebar},
+		{gocui.KeyCtrlU, panelURL},
+		{gocui.KeyCtrlE, panelResponse},
 	}
 	for _, b := range jumpBindings {
-		if err := g.SetKeybinding("", b.ch, gocui.ModAlt, jumpToPanel(b.to)); err != nil {
+		if err := g.SetKeybinding("", b.key, gocui.ModNone, jumpToPanel(b.to)); err != nil {
 			return err
 		}
 	}
@@ -84,7 +90,7 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		}
 		return g.SetCurrentView("content")
 	}
-	if err := g.SetKeybinding("", '3', gocui.ModAlt, jumpToContent); err != nil {
+	if err := g.SetKeybinding("", gocui.KeyCtrlB, gocui.ModNone, jumpToContent); err != nil {
 		return err
 	}
 
@@ -131,7 +137,7 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 			return nil
 		}
 		if uv, err := g.View("url"); err == nil {
-			setViewText(uv, a.urlValue)
+			setURLText(uv, a.urlValue)
 		}
 		if mv, err := g.View("method"); err == nil {
 			renderMethod(mv, a)
@@ -288,20 +294,48 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		}
 		return g.SetCurrentView("content")
 	}
+	urlHome := func(g *gocui.Gui, v *gocui.View) error {
+		_ = v.SetOrigin(0, 0)
+		_ = v.SetCursor(0, 0)
+		return nil
+	}
+	urlEnd := func(g *gocui.Gui, v *gocui.View) error {
+		setURLText(v, trimTrailingNewline(v.Buffer()))
+		return nil
+	}
 
 	urlBindings := []struct {
 		key interface{}
+		mod gocui.Modifier
 		h   gocui.KeybindingHandler
 	}{
-		{gocui.KeyArrowUp, urlUp},
-		{gocui.KeyArrowDown, urlDown},
-		{gocui.KeyArrowLeft, switchTab(-1)},
-		{gocui.KeyArrowRight, switchTab(1)},
-		{gocui.KeyEnter, urlEnter},
-		{gocui.KeyCtrlR, sendRequest},
+		// Left/Right stay reserved for moving the cursor inside the URL
+		// text (it's an editable field) — that was the actual bug: they
+		// used to double as tab-switch. Up/Down keep cycling the method
+		// as before (a single-line field has no vertical text to move
+		// through, so there's nothing to reclaim there). Tab switching
+		// moves to Ctrl+P/N, and Ctrl+K/J duplicate method-cycle, so both
+		// actions also have a non-arrow shortcut: raw single-byte control
+		// codes that every terminal sends identically (same mechanism as
+		// Ctrl+R below) — unlike Alt+Arrow, which relies on a
+		// modifier-encoded escape sequence (e.g. "ESC[1;3C") that this
+		// app's terminal library doesn't parse, so it leaked as literal
+		// text into the URL instead of firing the shortcut.
+		// Ctrl+J/K echo vim's j/k (down/up); Ctrl+N/P echo emacs'
+		// next/previous. H/I/M are avoided: they alias Backspace/Tab/Enter.
+		{gocui.KeyArrowUp, gocui.ModNone, urlUp},
+		{gocui.KeyArrowDown, gocui.ModNone, urlDown},
+		{gocui.KeyCtrlK, gocui.ModNone, urlUp},
+		{gocui.KeyCtrlJ, gocui.ModNone, urlDown},
+		{gocui.KeyCtrlP, gocui.ModNone, switchTab(-1)},
+		{gocui.KeyCtrlN, gocui.ModNone, switchTab(1)},
+		{gocui.KeyHome, gocui.ModNone, urlHome},
+		{gocui.KeyEnd, gocui.ModNone, urlEnd},
+		{gocui.KeyEnter, gocui.ModNone, urlEnter},
+		{gocui.KeyCtrlR, gocui.ModNone, sendRequest},
 	}
 	for _, b := range urlBindings {
-		if err := g.SetKeybinding(panelURL, b.key, gocui.ModNone, b.h); err != nil {
+		if err := g.SetKeybinding(panelURL, b.key, b.mod, b.h); err != nil {
 			return err
 		}
 	}

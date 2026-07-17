@@ -143,7 +143,7 @@ func layout(g *gocui.Gui, a *App) error {
 		v.Frame = false
 		v.Title = "URL"
 		v.Editable = true
-		setViewText(v, a.urlValue)
+		setURLText(v, a.urlValue)
 		if err := g.SetCurrentView("url"); err != nil {
 			return err
 		}
