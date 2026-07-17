@@ -82,12 +82,34 @@ func renderTabs(v *gocui.View, a *App) {
 	setViewText(v, strings.Join(parts, " "))
 }
 
+// footerHints returns the always-visible keybinding help for whatever has
+// focus right now, so users never have to guess (e.g. that ↑/↓ cycle the
+// HTTP method while the URL panel is focused).
+func footerHints(a *App) string {
+	if a.promptMode != "" {
+		return "Enter confirm  ·  Esc cancel"
+	}
+	if a.subFocus {
+		return "Esc save & exit editor  ·  Ctrl+R send  ·  Tab next panel"
+	}
+	switch a.activePanel {
+	case panelSidebar:
+		return "↑↓/jk navigate  ·  Enter open  ·  n new  ·  a add request  ·  r rename  ·  d delete  ·  v edit vars  ·  Tab next panel  ·  q quit"
+	case panelURL:
+		return "↑↓ change method  ·  ←→ switch tab  ·  Enter edit content  ·  Ctrl+R send  ·  Tab next panel  ·  Alt+1-4 jump panel"
+	case panelResponse:
+		return "↑↓ scroll  ·  PgUp/PgDn page  ·  Tab next panel"
+	}
+	return "Tab cycle panels  ·  Alt+1-4 jump panel  ·  q quit"
+}
+
 func renderStatus(v *gocui.View, a *App) {
 	text := a.statusMsg
 	if a.sending {
 		text = "⏳ " + text
 	}
-	setViewText(v, text)
+	hints := ansiWrap(footerHints(a), colorMuted, false)
+	setViewText(v, hints+"\n"+text)
 }
 
 func renderResponse(v *gocui.View, a *App) {
