@@ -107,14 +107,14 @@ func TestAppEnterExitContentEditor(t *testing.T) {
 	}
 }
 
-func TestAppEnterContentEditor_AuthTabBlocked(t *testing.T) {
+func TestAppEnterContentEditor_AuthTabEditable(t *testing.T) {
 	a := NewApp()
 	a.activeTab = tabAuth
-	if a.EnterContentEditor() {
-		t.Error("expected EnterContentEditor to be blocked on Auth tab")
+	if !a.EnterContentEditor() {
+		t.Error("expected EnterContentEditor to succeed on Auth tab")
 	}
-	if a.subFocus {
-		t.Error("expected subFocus to remain false")
+	if !a.subFocus {
+		t.Error("expected subFocus=true after entering Auth tab editor")
 	}
 }
 

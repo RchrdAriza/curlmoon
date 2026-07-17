@@ -127,6 +127,7 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 	}
 	sidebarEnter := func(g *gocui.Gui, v *gocui.View) error {
 		if !a.SelectSidebarEntry() {
+			renderSidebar(v, a)
 			return nil
 		}
 		if uv, err := g.View("url"); err == nil {
@@ -139,6 +140,18 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		return g.SetCurrentView("url")
 	}
 	sidebarNewCollection := func(g *gocui.Gui, v *gocui.View) error {
+		if len(a.sidebar) > 0 {
+			switch a.sidebar[a.sidebarSel].section {
+			case "env":
+				if a.envStore == nil {
+					return nil
+				}
+				a.StartPrompt("newEnvironment", sidebarEntry{}, "")
+				return nil
+			case "history":
+				return nil
+			}
+		}
 		if a.store == nil {
 			return nil
 		}
@@ -149,23 +162,69 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		if a.store == nil || len(a.sidebar) == 0 {
 			return nil
 		}
+		if a.sidebar[a.sidebarSel].section != "" {
+			return nil
+		}
 		a.StartPrompt("newRequest", sidebarEntry{collIdx: a.sidebar[a.sidebarSel].collIdx}, "")
 		return nil
 	}
 	sidebarRename := func(g *gocui.Gui, v *gocui.View) error {
-		if a.store == nil || len(a.sidebar) == 0 {
+		if len(a.sidebar) == 0 {
 			return nil
 		}
 		sel := a.sidebar[a.sidebarSel]
+		if sel.section == "env" {
+			if sel.isFolder || a.envStore == nil {
+				return nil
+			}
+			a.StartPrompt("renameEnv", sel, a.environments[sel.envIdx].Name)
+			return nil
+		}
+		if sel.section != "" || a.store == nil {
+			return nil
+		}
 		a.StartPrompt("rename", sel, sel.name)
 		return nil
 	}
 	sidebarDelete := func(g *gocui.Gui, v *gocui.View) error {
-		if a.store == nil || len(a.sidebar) == 0 {
+		if len(a.sidebar) == 0 {
 			return nil
 		}
 		sel := a.sidebar[a.sidebarSel]
+		if sel.section == "env" {
+			if sel.isFolder || a.envStore == nil {
+				return nil
+			}
+			sel.name = a.environments[sel.envIdx].Name
+			a.StartPrompt("confirmDeleteEnv", sel, "")
+			return nil
+		}
+		if sel.section != "" || a.store == nil {
+			return nil
+		}
 		a.StartPrompt("confirmDelete", sel, "")
+		return nil
+	}
+	sidebarEditVars := func(g *gocui.Gui, v *gocui.View) error {
+		if len(a.sidebar) == 0 {
+			return nil
+		}
+		sel := a.sidebar[a.sidebarSel]
+		if sel.section != "env" || sel.isFolder {
+			return nil
+		}
+		// Don't call g.SetCurrentView here: gocui redelivers the same
+		// keystroke to the newly-focused view's editor right after this
+		// handler returns, which would type the triggering key into the
+		// content buffer. Instead, just flag the pending switch and let
+		// layout() perform it on the next redraw (same trick used for the
+		// prompt overlay).
+		if !a.StartEnvEdit(sel.envIdx) {
+			return nil
+		}
+		if sv, err := g.View("status"); err == nil {
+			renderStatus(sv, a)
+		}
 		return nil
 	}
 
@@ -182,6 +241,7 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		{'a', sidebarNewRequest},
 		{'r', sidebarRename},
 		{'d', sidebarDelete},
+		{'v', sidebarEditVars},
 	}
 	for _, b := range sidebarBindings {
 		if err := g.SetKeybinding(panelSidebar, b.key, gocui.ModNone, b.h); err != nil {
@@ -249,6 +309,16 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 	// --- content (headers/body/params/auth editor) ---
 	contentEsc := func(g *gocui.Gui, v *gocui.View) error {
 		syncFromViews(g, a)
+		if a.envEditIdx >= 0 {
+			a.SaveEnvEdit()
+			if sv, err := g.View("status"); err == nil {
+				renderStatus(sv, a)
+			}
+			if sbv, err := g.View("sidebar"); err == nil {
+				renderSidebar(sbv, a)
+			}
+			return g.SetCurrentView(panelSidebar)
+		}
 		a.ExitContentEditor()
 		if sv, err := g.View("status"); err == nil {
 			renderStatus(sv, a)

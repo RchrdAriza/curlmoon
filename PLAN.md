@@ -62,12 +62,12 @@ Postman TUI de bolsillo para Termux. Stack: **Go + Bubble Tea**.
 - [x] `cmd/curlmoon/main.go` — entrypoint que faltaba, ahora arranca con persistencia real
 - [x] Tests: 24 tests nuevos (internal/collection + wiring TUI), cobertura 80%/71%
 
-### Fase 4 — Features de Postman
-- [ ] Variables `{{variable}}` en URL/headers/body
-- [ ] Editor de entornos (crear, activar, desactivar)
-- [ ] Auth helpers (None / Basic / Bearer / API Key / OAuth2)
-- [ ] Historial de requests
-- [ ] Tests
+### Fase 4 — Features de Postman ✅
+- [x] Variables `{{variable}}` en URL/headers/body (resueltas contra el entorno activo al enviar)
+- [x] Editor de entornos (crear, renombrar, borrar, activar/desactivar, editar variables — sección "Environments" en el sidebar, `n`/`r`/`d`/`v`)
+- [x] Auth helpers (None / Basic / Bearer / API Key / OAuth2) vía tab "Auth" editable con formato `Key: Value`
+- [x] Historial de requests (sección "History" en el sidebar, hasta 50 entradas, Enter para recargar)
+- [x] Tests: nuevos paquetes `internal/environment` y `internal/history` + wiring en `internal/tui`
 
 ### Fase 5 — Power features
 - [ ] GraphQL (query + variables)

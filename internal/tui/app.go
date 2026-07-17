@@ -2,10 +2,13 @@ package tui
 
 import (
 	"curlmoon/internal/collection"
+	"curlmoon/internal/environment"
+	"curlmoon/internal/history"
 	"curlmoon/internal/httpclient"
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 )
 
 const (
@@ -33,6 +36,10 @@ type sidebarEntry struct {
 	indent   int
 	collIdx  int   // index into App.collections; meaningful only when store != nil
 	itemPath []int // path within collection.Item tree; empty means the entry is the collection root
+
+	section string // "" (collection), "env", or "history" — which App slice this entry indexes into
+	envIdx  int    // index into App.environments; meaningful when section == "env"
+	histIdx int    // index into App.historyEntries; meaningful when section == "history"
 }
 
 // App holds all curlmoon state. It is plain, gocui-free data plus pure
@@ -53,6 +60,7 @@ type App struct {
 	headersText string
 	paramsText  string
 	bodyText    string
+	authText    string
 
 	sending bool
 
@@ -65,7 +73,17 @@ type App struct {
 	store       *collection.Store
 	collections []*collection.Collection
 
-	promptMode   string // "", "newCollection", "newRequest", "rename", "confirmDelete"
+	envStore      *environment.Store
+	environments  []*environment.Environment
+	activeEnvName  string
+	envEditIdx     int    // index into environments currently open in the content editor; -1 when not editing
+	envEditText    string // live buffer for the environment being edited
+	envEditPending bool   // true right after StartEnvEdit, until layout() has moved focus into "content"
+
+	historyStore   *history.Store
+	historyEntries []history.Entry
+
+	promptMode   string // "", "newCollection", "newRequest", "rename", "confirmDelete", "newEnvironment", "renameEnv", "confirmDeleteEnv"
 	promptTarget sidebarEntry
 	promptText   string
 }
@@ -90,6 +108,8 @@ func NewApp() *App {
 		sidebar:     sidebar,
 		activePanel: panelURL,
 		activeTab:   tabHeaders,
+		authText:    defaultAuthText,
+		envEditIdx:  -1,
 		statusMsg:   "Ready — Tab switches panels, Enter to edit fields",
 	}
 }
@@ -106,6 +126,14 @@ func NewAppWithStore(store *collection.Store) *App {
 	if len(a.collections) == 0 {
 		a.seedDefaultCollections()
 	}
+
+	a.envStore = environment.NewStore(store.BaseDir)
+	a.environments, _ = a.envStore.LoadAll()
+	a.activeEnvName, _ = a.envStore.LoadActive()
+
+	a.historyStore = history.NewStore(store.BaseDir)
+	a.historyEntries, _ = a.historyStore.Load()
+
 	a.rebuildSidebar()
 	a.restoreSession()
 	return a
@@ -138,13 +166,39 @@ func (a *App) seedDefaultCollections() {
 	}
 }
 
-// rebuildSidebar flattens the in-memory collections tree into sidebar rows.
+// rebuildSidebar flattens the in-memory collections tree, plus environments
+// and history when present, into sidebar rows.
 func (a *App) rebuildSidebar() {
 	var entries []sidebarEntry
 	for ci, c := range a.collections {
 		entries = append(entries, sidebarEntry{name: c.Info.Name, isFolder: true, collIdx: ci})
 		entries = append(entries, flattenItems(c.Item, ci, nil, 1)...)
 	}
+
+	if a.envStore != nil {
+		entries = append(entries, sidebarEntry{name: "Environments", isFolder: true, section: "env"})
+		for i, env := range a.environments {
+			name := env.Name
+			if env.Name == a.activeEnvName {
+				name = "● " + name
+			}
+			entries = append(entries, sidebarEntry{name: name, indent: 1, section: "env", envIdx: i})
+		}
+	}
+
+	if a.historyStore != nil {
+		entries = append(entries, sidebarEntry{name: "History", isFolder: true, section: "history"})
+		for i, h := range a.historyEntries {
+			label := h.URL
+			if h.StatusCode > 0 {
+				label = fmt.Sprintf("%s (%d)", label, h.StatusCode)
+			} else if h.Err != "" {
+				label = label + " (error)"
+			}
+			entries = append(entries, sidebarEntry{name: label, method: h.Method, indent: 1, section: "history", histIdx: i})
+		}
+	}
+
 	a.sidebar = entries
 	if a.sidebarSel >= len(a.sidebar) {
 		a.sidebarSel = len(a.sidebar) - 1
@@ -198,6 +252,9 @@ func (a *App) restoreSession() {
 	}
 	a.headersText = serializeKV(toKVPairs(sess.Headers))
 	a.paramsText = serializeKV(toKVPairs(sess.Params))
+	if sess.AuthText != "" {
+		a.authText = sess.AuthText
+	}
 }
 
 func (a *App) saveSession() {
@@ -209,6 +266,7 @@ func (a *App) saveSession() {
 		URL:       a.urlValue,
 		BodyType:  bodyTypes[a.bodyType],
 		Body:      a.bodyText,
+		AuthText:  a.authText,
 		ActiveTab: a.activeTab,
 	}
 	for _, p := range parseKV(a.headersText) {
@@ -265,6 +323,7 @@ func (a *App) buildHeaders() map[string]string {
 			h["Content-Type"] = "application/x-www-form-urlencoded"
 		}
 	}
+	applyAuth(h, a.authText)
 	return h
 }
 
@@ -276,15 +335,33 @@ func (a *App) buildBody() string {
 	return ""
 }
 
-// doRequest executes the current request synchronously. Callers that need to
-// stay responsive (the real gocui app) should run this in a goroutine and
-// feed the result back via HandleResponse through *gocui.Gui.Execute.
+// activeEnvVars returns the resolved variable map for the currently active
+// environment, or an empty map if none is active.
+func (a *App) activeEnvVars() map[string]string {
+	for _, env := range a.environments {
+		if env.Name == a.activeEnvName {
+			return env.Vars()
+		}
+	}
+	return nil
+}
+
+// doRequest executes the current request synchronously, resolving any
+// {{variable}} tokens against the active environment first. Callers that
+// need to stay responsive (the real gocui app) should run this in a
+// goroutine and feed the result back via HandleResponse through
+// *gocui.Gui.Execute.
 func (a *App) doRequest() (*httpclient.Response, error) {
+	vars := a.activeEnvVars()
+	headers := a.buildHeaders()
+	for k, v := range headers {
+		headers[k] = environment.Resolve(v, vars)
+	}
 	req := &httpclient.Request{
 		Method:   methods[a.methodIndex],
-		URL:      a.buildURL(),
-		Headers:  a.buildHeaders(),
-		Body:     a.buildBody(),
+		URL:      environment.Resolve(a.buildURL(), vars),
+		Headers:  headers,
+		Body:     environment.Resolve(a.buildBody(), vars),
 		BodyType: bodyTypes[a.bodyType],
 	}
 	if req.URL == "" {
@@ -306,6 +383,7 @@ func (a *App) HandleResponse(resp *httpclient.Response, err error) {
 		a.respErr = err
 		a.showResp = false
 		a.statusMsg = fmt.Sprintf("Error: %v", err)
+		a.recordHistory(err.Error(), 0, "")
 		return
 	}
 	a.response = resp
@@ -313,6 +391,29 @@ func (a *App) HandleResponse(resp *httpclient.Response, err error) {
 	a.showResp = true
 	a.statusMsg = fmt.Sprintf("%d %s — %v — %d bytes",
 		resp.StatusCode, resp.Status, resp.Elapsed, resp.Size)
+	a.recordHistory("", resp.StatusCode, resp.Elapsed.String())
+}
+
+// recordHistory appends the just-executed request to the history log, keyed
+// off the method/URL currently loaded in the editor.
+func (a *App) recordHistory(errMsg string, statusCode int, elapsed string) {
+	if a.historyStore == nil {
+		return
+	}
+	entry := history.Entry{
+		Method:     methods[a.methodIndex],
+		URL:        a.urlValue,
+		StatusCode: statusCode,
+		Elapsed:    elapsed,
+		Err:        errMsg,
+		At:         time.Now(),
+	}
+	entries, err := a.historyStore.Add(entry)
+	if err != nil {
+		return
+	}
+	a.historyEntries = entries
+	a.rebuildSidebar()
 }
 
 // CycleMethod moves the selected HTTP method by delta (wrapping around).
@@ -361,6 +462,21 @@ func (a *App) SelectSidebarEntry() bool {
 		return false
 	}
 	item := a.sidebar[a.sidebarSel]
+
+	if item.section == "env" {
+		if item.isFolder {
+			return false
+		}
+		a.toggleActiveEnvironment(item.envIdx)
+		return false
+	}
+	if item.section == "history" {
+		if item.isFolder {
+			return false
+		}
+		return a.loadHistoryEntry(item.histIdx)
+	}
+
 	if item.isFolder || item.url == "" {
 		return false
 	}
@@ -377,11 +493,8 @@ func (a *App) SelectSidebarEntry() bool {
 }
 
 // EnterContentEditor moves focus into the tab content view (headers/body/
-// params), unless the active tab is the non-editable Auth placeholder.
+// auth/params).
 func (a *App) EnterContentEditor() bool {
-	if a.activeTab == tabAuth {
-		return false
-	}
 	a.subFocus = true
 	a.statusMsg = "Esc to exit editor"
 	return true
@@ -390,6 +503,85 @@ func (a *App) EnterContentEditor() bool {
 func (a *App) ExitContentEditor() {
 	a.subFocus = false
 	a.statusMsg = "Exited editor"
+}
+
+// toggleActiveEnvironment activates the environment at envIdx, or
+// deactivates it if it's already the active one.
+func (a *App) toggleActiveEnvironment(envIdx int) {
+	if envIdx < 0 || envIdx >= len(a.environments) {
+		return
+	}
+	env := a.environments[envIdx]
+	if a.activeEnvName == env.Name {
+		a.activeEnvName = ""
+		a.statusMsg = fmt.Sprintf("Deactivated environment %q", env.Name)
+	} else {
+		a.activeEnvName = env.Name
+		a.statusMsg = fmt.Sprintf("Activated environment %q", env.Name)
+	}
+	if a.envStore != nil {
+		_ = a.envStore.SetActive(a.activeEnvName)
+	}
+	a.rebuildSidebar()
+}
+
+// loadHistoryEntry restores a past request's method/URL into the editor.
+func (a *App) loadHistoryEntry(idx int) bool {
+	if idx < 0 || idx >= len(a.historyEntries) {
+		return false
+	}
+	h := a.historyEntries[idx]
+	a.urlValue = h.URL
+	for i, meth := range methods {
+		if meth == h.Method {
+			a.methodIndex = i
+			break
+		}
+	}
+	a.activePanel = panelURL
+	a.statusMsg = fmt.Sprintf("Loaded from history: %s %s", h.Method, h.URL)
+	return true
+}
+
+// StartEnvEdit opens the content editor pre-filled with the given
+// environment's variables, formatted as "Key: Value" lines like headers.
+func (a *App) StartEnvEdit(envIdx int) bool {
+	if envIdx < 0 || envIdx >= len(a.environments) {
+		return false
+	}
+	env := a.environments[envIdx]
+	pairs := make([]KeyValuePair, len(env.Values))
+	for i, kv := range env.Values {
+		pairs[i] = KeyValuePair{Key: kv.Key, Value: kv.Value}
+	}
+	a.envEditIdx = envIdx
+	a.envEditText = serializeKV(pairs)
+	a.envEditPending = true
+	a.subFocus = true
+	a.statusMsg = fmt.Sprintf("Editing variables for %q — Esc to save", env.Name)
+	return true
+}
+
+// SaveEnvEdit parses the in-progress environment edit text back into the
+// environment's variables and persists it.
+func (a *App) SaveEnvEdit() {
+	if a.envEditIdx < 0 || a.envEditIdx >= len(a.environments) {
+		a.envEditIdx = -1
+		return
+	}
+	env := a.environments[a.envEditIdx]
+	var values []environment.KeyVal
+	for _, p := range parseKV(a.envEditText) {
+		values = append(values, environment.KeyVal{Key: p.Key, Value: p.Value, Enabled: true})
+	}
+	env.Values = values
+	if a.envStore != nil {
+		_ = a.envStore.Save(env)
+	}
+	a.envEditIdx = -1
+	a.envEditText = ""
+	a.subFocus = false
+	a.statusMsg = fmt.Sprintf("Saved variables for %q", env.Name)
 }
 
 // StartPrompt opens a sidebar prompt overlay (new collection/request, rename,
@@ -464,6 +656,45 @@ func (a *App) ConfirmPrompt() {
 				_ = a.store.Save(c)
 				a.statusMsg = "Request deleted"
 			}
+		}
+
+	case "newEnvironment":
+		name := strings.TrimSpace(a.promptText)
+		if name != "" && a.envStore != nil {
+			if env, err := a.envStore.Create(name); err != nil {
+				a.statusMsg = fmt.Sprintf("Error: %v", err)
+			} else {
+				a.environments = append(a.environments, env)
+				a.statusMsg = fmt.Sprintf("Created environment %q", name)
+			}
+		}
+
+	case "renameEnv":
+		newName := strings.TrimSpace(a.promptText)
+		if newName != "" && target.envIdx < len(a.environments) && a.envStore != nil {
+			env := a.environments[target.envIdx]
+			if err := a.envStore.Rename(env.Name, newName); err != nil {
+				a.statusMsg = fmt.Sprintf("Error: %v", err)
+			} else {
+				if a.activeEnvName == env.Name {
+					a.activeEnvName = newName
+					_ = a.envStore.SetActive(newName)
+				}
+				env.Name = newName
+				a.statusMsg = fmt.Sprintf("Renamed environment to %q", newName)
+			}
+		}
+
+	case "confirmDeleteEnv":
+		if target.envIdx < len(a.environments) && a.envStore != nil {
+			env := a.environments[target.envIdx]
+			_ = a.envStore.Delete(env.Name)
+			if a.activeEnvName == env.Name {
+				a.activeEnvName = ""
+				_ = a.envStore.SetActive("")
+			}
+			a.environments = append(append([]*environment.Environment{}, a.environments[:target.envIdx]...), a.environments[target.envIdx+1:]...)
+			a.statusMsg = "Environment deleted"
 		}
 	}
 

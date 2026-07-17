@@ -4,8 +4,6 @@ import (
 	"github.com/jesseduffield/gocui"
 )
 
-const authPlaceholder = "Auth helpers coming soon.\n\nSupports: None, Basic, Bearer Token, API Key, OAuth 2.0"
-
 // contentText returns the text that should back the "content" view for the
 // given tab, reading from the App's cached per-tab buffers.
 func contentText(a *App, tab int) string {
@@ -15,7 +13,7 @@ func contentText(a *App, tab int) string {
 	case tabBody:
 		return a.bodyText
 	case tabAuth:
-		return authPlaceholder
+		return a.authText
 	case tabParams:
 		return a.paramsText
 	}
@@ -30,8 +28,21 @@ func loadContentTab(g *gocui.Gui, a *App) {
 	if err != nil {
 		return
 	}
-	v.Editable = a.activeTab != tabAuth
+	v.Editable = true
 	setViewText(v, contentText(a, a.activeTab))
+	v.SetCursor(0, 0)
+	v.SetOrigin(0, 0)
+}
+
+// loadEnvEditor overwrites the "content" view with the variables of the
+// environment currently open for editing (see App.StartEnvEdit).
+func loadEnvEditor(g *gocui.Gui, a *App) {
+	v, err := g.View("content")
+	if err != nil {
+		return
+	}
+	v.Editable = true
+	setViewText(v, a.envEditText)
 	v.SetCursor(0, 0)
 	v.SetOrigin(0, 0)
 }
@@ -45,16 +56,24 @@ func syncFromViews(g *gocui.Gui, a *App) {
 	if v, err := g.View("url"); err == nil {
 		a.urlValue = trimTrailingNewline(v.Buffer())
 	}
-	if v, err := g.View("content"); err == nil && a.activeTab != tabAuth {
-		text := trimTrailingNewline(v.Buffer())
-		switch a.activeTab {
-		case tabHeaders:
-			a.headersText = text
-		case tabBody:
-			a.bodyText = text
-		case tabParams:
-			a.paramsText = text
-		}
+	v, err := g.View("content")
+	if err != nil {
+		return
+	}
+	text := trimTrailingNewline(v.Buffer())
+	if a.envEditIdx >= 0 {
+		a.envEditText = text
+		return
+	}
+	switch a.activeTab {
+	case tabHeaders:
+		a.headersText = text
+	case tabBody:
+		a.bodyText = text
+	case tabAuth:
+		a.authText = text
+	case tabParams:
+		a.paramsText = text
 	}
 }
 
@@ -157,12 +176,24 @@ func layout(g *gocui.Gui, a *App) error {
 		}
 		v.Frame = false
 		v.Title = "Headers"
-		v.Editable = a.activeTab != tabAuth
+		v.Editable = true
 		setViewText(v, contentText(a, a.activeTab))
 	}
 	if v, err := g.View("content"); err == nil {
-		v.Title = tabNames[a.activeTab]
+		if a.envEditIdx >= 0 {
+			v.Title = "Env: " + a.environments[a.envEditIdx].Name
+		} else {
+			v.Title = tabNames[a.activeTab]
+		}
 		drawBorder(g, rightX0, 6, maxX-1, contentY1, borderColor(a.subFocus), "3 "+focusTitle(v.Title, a.subFocus))
+	}
+
+	if a.envEditPending {
+		a.envEditPending = false
+		loadEnvEditor(g, a)
+		if err := g.SetCurrentView("content"); err != nil {
+			return err
+		}
 	}
 
 	if v, err := g.SetView("response", rightX0, contentY1+1, maxX-1, maxY-3); err != nil {

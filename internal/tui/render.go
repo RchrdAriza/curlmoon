@@ -143,5 +143,11 @@ func renderPrompt(v *gocui.View, a *App) {
 		v.Title = "Rename to"
 	case "confirmDelete":
 		v.Title = fmt.Sprintf("Delete %q? (y/n)", a.promptTarget.name)
+	case "newEnvironment":
+		v.Title = "New environment name"
+	case "renameEnv":
+		v.Title = "Rename environment to"
+	case "confirmDeleteEnv":
+		v.Title = fmt.Sprintf("Delete environment %q? (y/n)", a.promptTarget.name)
 	}
 }
