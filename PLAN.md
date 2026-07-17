@@ -53,13 +53,14 @@ Postman TUI de bolsillo para Termux. Stack: **Go + Bubble Tea**.
 - [x] JSON syntax highlighting en response
 - [x] Tests: 39 tests, 73-83% cobertura
 
-### Fase 3 — Colecciones y persistencia
-- [ ] Schema JSON para colecciones (compatible Postman v2.1)
-- [ ] Guardar/cargar en `~/.curlmoon/collections/`
-- [ ] CRUD: crear/renombrar/eliminar colecciones
-- [ ] Sidebar navegable con colecciones reales
-- [ ] Auto-guardado de sesión
-- [ ] Tests
+### Fase 3 — Colecciones y persistencia ✅
+- [x] Schema JSON para colecciones (compatible Postman v2.1)
+- [x] Guardar/cargar en `~/.curlmoon/collections/`
+- [x] CRUD: crear/renombrar/eliminar colecciones (teclas `n`/`a`/`r`/`d` en el sidebar)
+- [x] Sidebar navegable con colecciones reales
+- [x] Auto-guardado de sesión (`~/.curlmoon/session.json`, restaurada al iniciar)
+- [x] `cmd/curlmoon/main.go` — entrypoint que faltaba, ahora arranca con persistencia real
+- [x] Tests: 24 tests nuevos (internal/collection + wiring TUI), cobertura 80%/71%
 
 ### Fase 4 — Features de Postman
 - [ ] Variables `{{variable}}` en URL/headers/body

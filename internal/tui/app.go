@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"curlmoon/internal/collection"
 	"curlmoon/internal/httpclient"
 	"fmt"
 	"net/url"
@@ -31,7 +32,8 @@ type sidebarEntry struct {
 	url      string
 	isFolder bool
 	indent   int
-	children []int
+	collIdx  int   // index into Model.collections; meaningful only when store != nil
+	itemPath []int // path within collection.Item tree; empty means the entry is the collection root
 }
 
 type Model struct {
@@ -64,6 +66,13 @@ type Model struct {
 	showResp  bool
 
 	statusMsg string
+
+	store       *collection.Store
+	collections []*collection.Collection
+
+	promptMode   string // "", "newCollection", "newRequest", "rename", "confirmDelete"
+	promptInput  textinput.Model
+	promptTarget sidebarEntry
 }
 
 func NewModel() Model {
@@ -117,6 +126,149 @@ func NewModel() Model {
 		respView:    viewport.New(0, 0),
 		statusMsg:   "Ready — Tab switches panels, Enter to edit fields",
 	}
+}
+
+// NewModelWithStore builds the real, persistence-backed app: collections are
+// loaded from store (seeded with example collections on first run) and the
+// last editor session is restored.
+func NewModelWithStore(store *collection.Store) Model {
+	m := NewModel()
+	m.store = store
+
+	cols, _ := store.LoadAll()
+	m.collections = cols
+	if len(m.collections) == 0 {
+		m.seedDefaultCollections()
+	}
+	m.rebuildSidebar()
+	m.restoreSession()
+	return m
+}
+
+func (m *Model) seedDefaultCollections() {
+	seed := []struct {
+		name  string
+		items []collection.Item
+	}{
+		{"httpbin.org", []collection.Item{
+			collection.NewRequestItem("GET /get", "GET", "https://httpbin.org/get", nil, "", ""),
+			collection.NewRequestItem("POST /post", "POST", "https://httpbin.org/post", nil, "", ""),
+			collection.NewRequestItem("PUT /put", "PUT", "https://httpbin.org/put", nil, "", ""),
+			collection.NewRequestItem("DELETE /delete", "DELETE", "https://httpbin.org/delete", nil, "", ""),
+		}},
+		{"JSON Placeholder", []collection.Item{
+			collection.NewRequestItem("GET /todos/1", "GET", "https://jsonplaceholder.typicode.com/todos/1", nil, "", ""),
+			collection.NewRequestItem("GET /posts", "GET", "https://jsonplaceholder.typicode.com/posts", nil, "", ""),
+		}},
+		{"GitHub API", []collection.Item{
+			collection.NewRequestItem("GET /zen", "GET", "https://api.github.com/zen", nil, "", ""),
+		}},
+	}
+	for _, s := range seed {
+		c := collection.NewCollection(s.name)
+		c.Item = s.items
+		_ = m.store.Save(c)
+		m.collections = append(m.collections, c)
+	}
+}
+
+// rebuildSidebar flattens the in-memory collections tree into sidebar rows.
+func (m *Model) rebuildSidebar() {
+	var entries []sidebarEntry
+	for ci, c := range m.collections {
+		entries = append(entries, sidebarEntry{name: c.Info.Name, isFolder: true, collIdx: ci})
+		entries = append(entries, flattenItems(c.Item, ci, nil, 1)...)
+	}
+	m.sidebar = entries
+	if m.sidebarSel >= len(m.sidebar) {
+		m.sidebarSel = len(m.sidebar) - 1
+	}
+	if m.sidebarSel < 0 {
+		m.sidebarSel = 0
+	}
+}
+
+func flattenItems(items []collection.Item, collIdx int, parentPath []int, indent int) []sidebarEntry {
+	var out []sidebarEntry
+	for i, it := range items {
+		path := append(append([]int{}, parentPath...), i)
+		if it.IsFolder() {
+			out = append(out, sidebarEntry{name: it.Name, isFolder: true, indent: indent, collIdx: collIdx, itemPath: path})
+			out = append(out, flattenItems(it.Item, collIdx, path, indent+1)...)
+		} else {
+			out = append(out, sidebarEntry{
+				name: it.Name, method: it.Request.Method, url: it.Request.URL.Raw,
+				indent: indent, collIdx: collIdx, itemPath: path,
+			})
+		}
+	}
+	return out
+}
+
+func newPromptInput(placeholder string) textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = placeholder
+	ti.CharLimit = 128
+	ti.Width = 40
+	ti.Focus()
+	return ti
+}
+
+func (m *Model) restoreSession() {
+	if m.store == nil {
+		return
+	}
+	sess, err := m.store.LoadSession()
+	if err != nil || sess == nil {
+		return
+	}
+	m.urlInput.SetValue(sess.URL)
+	for i, meth := range methods {
+		if meth == sess.Method {
+			m.methodIndex = i
+			break
+		}
+	}
+	for i, bt := range bodyTypes {
+		if bt == sess.BodyType {
+			m.bodyType = i
+			break
+		}
+	}
+	m.bodyEditor.SetValue(sess.Body)
+	if sess.ActiveTab >= 0 && sess.ActiveTab < len(m.tabs) {
+		m.activeTab = sess.ActiveTab
+	}
+	m.headers = *NewKeyValueEditorWithPairs("Header", "Value", toKVPairs(sess.Headers))
+	m.params = *NewKeyValueEditorWithPairs("Param", "Value", toKVPairs(sess.Params))
+}
+
+func (m Model) saveSession() {
+	if m.store == nil {
+		return
+	}
+	sess := &collection.Session{
+		Method:    methods[m.methodIndex],
+		URL:       m.urlInput.Value(),
+		BodyType:  bodyTypes[m.bodyType],
+		Body:      m.bodyEditor.Value(),
+		ActiveTab: m.activeTab,
+	}
+	for _, p := range m.headers.Pairs() {
+		sess.Headers = append(sess.Headers, collection.KeyVal{Key: p.Key, Value: p.Value})
+	}
+	for _, p := range m.params.Pairs() {
+		sess.Params = append(sess.Params, collection.KeyVal{Key: p.Key, Value: p.Value})
+	}
+	_ = m.store.SaveSession(sess)
+}
+
+func toKVPairs(kv []collection.KeyVal) []KeyValuePair {
+	pairs := make([]KeyValuePair, len(kv))
+	for i, h := range kv {
+		pairs[i] = KeyValuePair{Key: h.Key, Value: h.Value}
+	}
+	return pairs
 }
 
 func (m Model) Init() tea.Cmd {
@@ -229,8 +381,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.initLayout(msg.Width, msg.Height), nil
 
 	case tea.KeyMsg:
+		if m.promptMode != "" {
+			return m.handlePromptKey(msg)
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "q":
+			m.saveSession()
 			return m, tea.Quit
 
 		case "tab":
@@ -361,7 +518,129 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.sidebarOff = m.sidebarSel - maxVisible + 1
 			}
 		}
+
+	case "n":
+		if m.store != nil {
+			m.promptMode = "newCollection"
+			m.promptInput = newPromptInput("Collection name")
+		}
+
+	case "a":
+		if m.store != nil && len(m.sidebar) > 0 {
+			m.promptTarget = sidebarEntry{collIdx: m.sidebar[m.sidebarSel].collIdx}
+			m.promptMode = "newRequest"
+			m.promptInput = newPromptInput("Request name")
+		}
+
+	case "r":
+		if m.store != nil && len(m.sidebar) > 0 {
+			sel := m.sidebar[m.sidebarSel]
+			m.promptTarget = sel
+			m.promptMode = "rename"
+			m.promptInput = newPromptInput("New name")
+			m.promptInput.SetValue(sel.name)
+		}
+
+	case "d":
+		if m.store != nil && len(m.sidebar) > 0 {
+			sel := m.sidebar[m.sidebarSel]
+			m.promptTarget = sel
+			m.promptMode = "confirmDelete"
+			m.promptInput = textinput.Model{}
+		}
 	}
+	return m, nil
+}
+
+// handlePromptKey routes key input while a sidebar prompt overlay (new
+// collection/request, rename, delete confirmation) is active.
+func (m Model) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.promptMode == "confirmDelete" {
+		switch msg.String() {
+		case "y":
+			return m.confirmPrompt()
+		default:
+			m.promptMode = ""
+			m.statusMsg = "Cancelled"
+		}
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "esc":
+		m.promptMode = ""
+		return m, nil
+	case "enter":
+		return m.confirmPrompt()
+	}
+
+	var cmd tea.Cmd
+	m.promptInput, cmd = m.promptInput.Update(msg)
+	return m, cmd
+}
+
+func (m Model) confirmPrompt() (tea.Model, tea.Cmd) {
+	target := m.promptTarget
+	switch m.promptMode {
+	case "newCollection":
+		name := strings.TrimSpace(m.promptInput.Value())
+		if name != "" {
+			if c, err := m.store.Create(name); err != nil {
+				m.statusMsg = fmt.Sprintf("Error: %v", err)
+			} else {
+				m.collections = append(m.collections, c)
+				m.statusMsg = fmt.Sprintf("Created collection %q", name)
+			}
+		}
+
+	case "newRequest":
+		name := strings.TrimSpace(m.promptInput.Value())
+		if name != "" && target.collIdx < len(m.collections) {
+			c := m.collections[target.collIdx]
+			item := collection.NewRequestItem(name, methods[m.methodIndex], m.buildURL(), m.buildHeaders(), m.buildBody(), bodyTypes[m.bodyType])
+			c.AddItemAt(nil, item)
+			if err := m.store.Save(c); err != nil {
+				m.statusMsg = fmt.Sprintf("Error: %v", err)
+			} else {
+				m.statusMsg = fmt.Sprintf("Saved request %q to %q", name, c.Info.Name)
+			}
+		}
+
+	case "rename":
+		newName := strings.TrimSpace(m.promptInput.Value())
+		if newName != "" && target.collIdx < len(m.collections) {
+			c := m.collections[target.collIdx]
+			if len(target.itemPath) == 0 {
+				if err := m.store.Rename(c.Info.Name, newName); err != nil {
+					m.statusMsg = fmt.Sprintf("Error: %v", err)
+				} else {
+					c.Info.Name = newName
+					m.statusMsg = fmt.Sprintf("Renamed to %q", newName)
+				}
+			} else {
+				c.RenameItem(target.itemPath, newName)
+				_ = m.store.Save(c)
+				m.statusMsg = "Renamed"
+			}
+		}
+
+	case "confirmDelete":
+		if target.collIdx < len(m.collections) {
+			c := m.collections[target.collIdx]
+			if len(target.itemPath) == 0 {
+				_ = m.store.Delete(c.Info.Name)
+				m.collections = append(append([]*collection.Collection{}, m.collections[:target.collIdx]...), m.collections[target.collIdx+1:]...)
+				m.statusMsg = "Collection deleted"
+			} else {
+				c.RemoveItem(target.itemPath)
+				_ = m.store.Save(c)
+				m.statusMsg = "Request deleted"
+			}
+		}
+	}
+
+	m.promptMode = ""
+	m.rebuildSidebar()
 	return m, nil
 }
 
@@ -495,7 +774,26 @@ func (m Model) View() string {
 	statusView := m.renderStatusBar()
 
 	rightSide := lipgloss.JoinVertical(lipgloss.Top, requestView, statusView, responseView)
-	return lipgloss.JoinHorizontal(lipgloss.Top, sidebarView, rightSide)
+	view := lipgloss.JoinHorizontal(lipgloss.Top, sidebarView, rightSide)
+	if m.promptMode != "" {
+		view = lipgloss.JoinVertical(lipgloss.Top, view, m.renderPrompt())
+	}
+	return view
+}
+
+func (m Model) renderPrompt() string {
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(secondary).Padding(0, 1)
+	switch m.promptMode {
+	case "newCollection":
+		return box.Render("New collection name: " + m.promptInput.View())
+	case "newRequest":
+		return box.Render("Save as (request name): " + m.promptInput.View())
+	case "rename":
+		return box.Render("Rename to: " + m.promptInput.View())
+	case "confirmDelete":
+		return box.Render(fmt.Sprintf("Delete %q? (y/n)", m.promptTarget.name))
+	}
+	return ""
 }
 
 func (m Model) renderSidebar(height int) string {

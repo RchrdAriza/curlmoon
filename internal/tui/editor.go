@@ -48,6 +48,25 @@ func (e *KeyValueEditor) addEmptyRow() {
 	e.Rows = append(e.Rows, &kvRow{key: k, value: v})
 }
 
+// NewKeyValueEditorWithPairs builds an editor pre-filled with pairs, plus a
+// trailing empty row so the user can keep adding entries.
+func NewKeyValueEditorWithPairs(keyLabel, valLabel string, pairs []KeyValuePair) *KeyValueEditor {
+	e := &KeyValueEditor{KeyLabel: keyLabel, ValLabel: valLabel, FocusIdx: -1}
+	for _, p := range pairs {
+		k := textinput.New()
+		k.Placeholder = keyLabel
+		k.CharLimit = 256
+		k.SetValue(p.Key)
+		v := textinput.New()
+		v.Placeholder = valLabel
+		v.CharLimit = 4096
+		v.SetValue(p.Value)
+		e.Rows = append(e.Rows, &kvRow{key: k, value: v})
+	}
+	e.addEmptyRow()
+	return e
+}
+
 func (e *KeyValueEditor) removeRow(i int) {
 	if i >= 0 && i < len(e.Rows) && len(e.Rows) > 1 {
 		e.Rows = append(e.Rows[:i], e.Rows[i+1:]...)
