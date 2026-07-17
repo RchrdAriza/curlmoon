@@ -87,6 +87,8 @@ type App struct {
 	promptMode   string // "", "newCollection", "newRequest", "rename", "confirmDelete", "newEnvironment", "renameEnv", "confirmDeleteEnv"
 	promptTarget sidebarEntry
 	promptText   string
+
+	showHelp bool // true while the keybinding help overlay (Ctrl+/) is open
 }
 
 // NewApp builds a standalone app with the built-in example sidebar and no

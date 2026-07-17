@@ -261,6 +261,42 @@ func layout(g *gocui.Gui, a *App) error {
 		}
 	}
 
+	if a.showHelp {
+		text, contentW, contentH := helpText()
+		w, h := contentW+4, contentH+2
+		if w > maxX-4 {
+			w = maxX - 4
+		}
+		if h > maxY-4 {
+			h = maxY - 4
+		}
+		x0, y0 := (maxX-w)/2, (maxY-h)/2
+		if v, err := g.SetView("help", x0, y0, x0+w, y0+h); err != nil {
+			if err != gocui.ErrUnknownView {
+				return err
+			}
+			// Same z-order trick as "prompt": appended last to g.views so
+			// its own Frame/title draw call happens after (on top of)
+			// everything laid out earlier this frame.
+			v.Frame = true
+			v.Title = "Keybindings (Esc or Ctrl+/ to close)"
+			setViewText(v, text)
+			if err := g.SetCurrentView("help"); err != nil {
+				return err
+			}
+		}
+		g.FgColor = colorPrimary
+	} else {
+		if _, err := g.View("help"); err == nil {
+			_ = g.DeleteView("help")
+			restoreView := a.activePanel
+			if a.subFocus {
+				restoreView = "content"
+			}
+			_ = g.SetCurrentView(restoreView)
+		}
+	}
+
 	return nil
 }
 

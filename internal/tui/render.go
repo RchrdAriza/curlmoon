@@ -111,21 +111,24 @@ func renderTabs(v *gocui.View, a *App) {
 // focus right now, so users never have to guess (e.g. that ↑/↓ cycle the
 // HTTP method while the URL panel is focused).
 func footerHints(a *App) string {
+	if a.showHelp {
+		return "Esc or Ctrl+/ close help"
+	}
 	if a.promptMode != "" {
 		return "Enter confirm  ·  Esc cancel"
 	}
 	if a.subFocus {
-		return "Esc save & exit editor  ·  Ctrl+R send  ·  Tab next panel"
+		return "Esc save & exit editor  ·  Ctrl+R send  ·  Tab next panel  ·  Ctrl+/ help"
 	}
 	switch a.activePanel {
 	case panelSidebar:
-		return "↑↓/jk navigate  ·  Enter open/toggle  ·  n new  ·  a add request  ·  r rename  ·  d delete  ·  v edit vars  ·  Tab next panel  ·  q quit"
+		return "↑↓/jk navigate  ·  Enter open/toggle  ·  n new  ·  a add request  ·  r rename  ·  d delete  ·  v edit vars  ·  Tab next panel  ·  Ctrl+/ help  ·  q quit"
 	case panelURL:
-		return "←→/Home/End move in URL  ·  ↑↓/Ctrl+K,J method  ·  Ctrl+P,N switch tab  ·  Enter edit content  ·  Ctrl+R send  ·  Tab next panel  ·  Ctrl+S,U,B,E jump panel"
+		return "←→/Home/End move in URL  ·  ↑↓/Ctrl+K,J method  ·  Ctrl+P,N switch tab  ·  Enter edit content  ·  Ctrl+R send  ·  Tab next panel  ·  Ctrl+S,U,B,E jump panel  ·  Ctrl+/ help"
 	case panelResponse:
-		return "↑↓ scroll  ·  PgUp/PgDn page  ·  Tab next panel"
+		return "↑↓ scroll  ·  PgUp/PgDn page  ·  Tab next panel  ·  Ctrl+/ help"
 	}
-	return "Tab cycle panels  ·  Ctrl+S,U,B,E jump panel  ·  q quit"
+	return "Tab cycle panels  ·  Ctrl+S,U,B,E jump panel  ·  Ctrl+/ help  ·  q quit"
 }
 
 func renderStatus(v *gocui.View, a *App) {
@@ -178,6 +181,86 @@ func renderResponse(v *gocui.View, a *App) {
 	body := highlightJSON(a.response.Body)
 
 	setViewText(v, statusText+"  "+infoText+"\n"+headerPreview.String()+"\n"+body)
+}
+
+// helpSections lists every keybinding grouped by the context it applies in,
+// rendered by the Ctrl+/ overlay (see toggleHelp in keybindings.go).
+var helpSections = []struct {
+	title string
+	rows  [][2]string
+}{
+	{"Global", [][2]string{
+		{"Tab", "cycle sidebar → URL → response"},
+		{"Ctrl+S / Ctrl+U / Ctrl+E", "jump to sidebar / URL / response"},
+		{"Ctrl+B", "jump into content editor"},
+		{"Ctrl+/", "toggle this help"},
+		{"q, Ctrl+C", "quit"},
+	}},
+	{"Sidebar", [][2]string{
+		{"↑↓, j/k", "navigate"},
+		{"Enter", "open request / toggle folder"},
+		{"n", "new collection / environment"},
+		{"a", "add request"},
+		{"r", "rename"},
+		{"d", "delete"},
+		{"v", "edit environment vars"},
+	}},
+	{"URL bar", [][2]string{
+		{"←→, Home/End", "move cursor"},
+		{"↑↓, Ctrl+K/J", "cycle HTTP method"},
+		{"Ctrl+P/N", "switch tab (Headers/Body/Auth/Params)"},
+		{"Enter", "edit tab content"},
+		{"Ctrl+R", "send request"},
+	}},
+	{"Content editor", [][2]string{
+		{"Esc", "save & exit editor"},
+		{"Ctrl+R", "send request"},
+	}},
+	{"Response", [][2]string{
+		{"↑↓", "scroll"},
+		{"PgUp/PgDn", "page"},
+	}},
+	{"Prompt", [][2]string{
+		{"Enter", "confirm"},
+		{"Esc", "cancel"},
+		{"y/n", "confirm/cancel delete"},
+	}},
+}
+
+// helpText renders helpSections into the fixed-width columns the overlay
+// draws, and reports the content's natural width/height so the caller can
+// size the floating view around it.
+func helpText() (text string, width, height int) {
+	keyW := 0
+	for _, s := range helpSections {
+		for _, row := range s.rows {
+			if len(row[0]) > keyW {
+				keyW = len(row[0])
+			}
+		}
+	}
+	var b strings.Builder
+	lineW := 0
+	lines := 0
+	for i, s := range helpSections {
+		if i > 0 {
+			b.WriteString("\n")
+			lines++
+		}
+		b.WriteString(ansiWrap(s.title, colorSecondary, true))
+		b.WriteString("\n")
+		lines++
+		for _, row := range s.rows {
+			line := fmt.Sprintf("  %-*s  %s", keyW, row[0], row[1])
+			if len(line) > lineW {
+				lineW = len(line)
+			}
+			b.WriteString(ansiWrap(fmt.Sprintf("  %-*s", keyW, row[0]), colorPrimary, true))
+			b.WriteString("  " + row[1] + "\n")
+			lines++
+		}
+	}
+	return b.String(), lineW, lines
 }
 
 func renderPrompt(v *gocui.View, a *App) {

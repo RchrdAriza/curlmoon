@@ -392,6 +392,29 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		}
 	}
 
+	// --- help overlay ---
+	// Bound to Ctrl+/ rather than literal Ctrl+? — terminals collapse
+	// Ctrl+<shifted key> onto the same single-byte control code as the
+	// unshifted key (see the jumpToPanel comment above), so Ctrl+/ and
+	// Ctrl+? already send an identical byte. Toggling on both Ctrl+/ and
+	// Esc (when open) means the same chord opens and closes it.
+	toggleHelp := func(g *gocui.Gui, v *gocui.View) error {
+		if a.promptMode != "" {
+			return nil
+		}
+		a.showHelp = !a.showHelp
+		return nil
+	}
+	if err := g.SetKeybinding("", gocui.KeyCtrlSlash, gocui.ModNone, toggleHelp); err != nil {
+		return err
+	}
+	if err := g.SetKeybinding("help", gocui.KeyEsc, gocui.ModNone, toggleHelp); err != nil {
+		return err
+	}
+	if err := g.SetKeybinding("help", gocui.KeyCtrlSlash, gocui.ModNone, toggleHelp); err != nil {
+		return err
+	}
+
 	// --- prompt overlay ---
 	promptConfirm := func(g *gocui.Gui, v *gocui.View) error {
 		if a.promptMode != "confirmDelete" {

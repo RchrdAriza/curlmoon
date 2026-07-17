@@ -1,0 +1,68 @@
+# curlmoon
+
+A pocket-sized Postman for the terminal — built for Termux, but it runs anywhere Go does.
+
+curlmoon is a single-binary TUI HTTP client: collections, environments, auth
+helpers, request history, and `{{variable}}` substitution, all driven from
+the keyboard.
+
+```
+┌──────────────┬──────────────────────────────────────────────────┐
+│  Collections │  [GET] https://api.example.com/users/{{id}}       │
+│                                                                   │
+│  ▸ My API    │  Headers │ Body │ Auth │ Params                   │
+│    GET /get  ├──────────────────────────────────────────────────┤
+│    POST /post│  Authorization: Bearer {{token}}                  │
+│  Environments│                                                   │
+│  History     ├──────────────────────────────────────────────────┤
+│              │  200 OK   142ms   1.2KB                           │
+│              │  { "id": 1, "name": "..." }                       │
+├──────────────┴──────────────────────────────────────────────────┤
+│  Tab cycle panels · Ctrl+S,U,B,E jump panel · Ctrl+/ help · q quit│
+└────────────────────────────────────────────────────────────────┘
+```
+
+## Features
+
+- Collections of requests, persisted as Postman v2.1-compatible JSON
+- Environments with `{{variable}}` substitution in the URL, headers, and body
+- Auth helpers: Basic, Bearer, API Key, OAuth2 (token)
+- Request history (last 50 sends, reloadable)
+- JSON syntax-highlighted, scrollable response viewer
+- Session auto-save/restore between runs
+- A full keybinding reference built in (`Ctrl+/`)
+
+## Install
+
+Requires Go 1.24+.
+
+```bash
+git clone https://github.com/<you>/curlmoon
+cd curlmoon
+go build -o $PREFIX/bin/curlmoon ./cmd/curlmoon   # Termux
+# or, on any other system:
+go build -o /usr/local/bin/curlmoon ./cmd/curlmoon
+```
+
+## Run
+
+```bash
+curlmoon
+```
+
+Data is stored under `~/.curlmoon/` (collections, environments, history,
+session). No config needed to get started — launching with no data creates
+a couple of example collections to explore.
+
+See [docs/USAGE.md](docs/USAGE.md) for the full guide: panels, keybindings,
+variables, auth, and the collection file format.
+
+## Development
+
+```bash
+go test ./... -v -cover
+go build ./...
+```
+
+The TUI is built on [gocui](https://github.com/jesseduffield/gocui); there's
+no dependency on a terminal emulator beyond a standard ANSI-capable one.
