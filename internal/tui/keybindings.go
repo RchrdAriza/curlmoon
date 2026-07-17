@@ -43,6 +43,51 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		}
 	}
 
+	// jumpToPanel lets Alt+<n> focus a panel directly instead of cycling
+	// through Tab repeatedly, mirroring lazygit's numbered-panel jumps.
+	// Plain digits are reserved for typing (URL/headers/body are text
+	// editors), so this only fires with the Alt modifier.
+	jumpToPanel := func(name string) gocui.KeybindingHandler {
+		return func(g *gocui.Gui, v *gocui.View) error {
+			syncFromViews(g, a)
+			if a.subFocus {
+				a.ExitContentEditor()
+			}
+			a.activePanel = name
+			if sv, err := g.View("status"); err == nil {
+				renderStatus(sv, a)
+			}
+			return g.SetCurrentView(name)
+		}
+	}
+	jumpBindings := []struct {
+		ch rune
+		to string
+	}{
+		{'1', panelSidebar},
+		{'2', panelURL},
+		{'4', panelResponse},
+	}
+	for _, b := range jumpBindings {
+		if err := g.SetKeybinding("", b.ch, gocui.ModAlt, jumpToPanel(b.to)); err != nil {
+			return err
+		}
+	}
+	jumpToContent := func(g *gocui.Gui, v *gocui.View) error {
+		syncFromViews(g, a)
+		if !a.EnterContentEditor() {
+			return nil
+		}
+		a.activePanel = panelURL
+		if sv, err := g.View("status"); err == nil {
+			renderStatus(sv, a)
+		}
+		return g.SetCurrentView("content")
+	}
+	if err := g.SetKeybinding("", '3', gocui.ModAlt, jumpToContent); err != nil {
+		return err
+	}
+
 	sendRequest := func(g *gocui.Gui, v *gocui.View) error {
 		if a.sending {
 			return nil

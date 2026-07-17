@@ -88,10 +88,14 @@ func layout(g *gocui.Gui, a *App) error {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
-		v.Frame = true
+		v.Frame = false
 		renderSidebar(v, a)
 	} else {
 		renderSidebar(v, a)
+	}
+	if v, err := g.View("sidebar"); err == nil {
+		focused := a.activePanel == panelSidebar
+		drawBorder(g, 0, 0, sidebarW, maxY-3, borderColor(focused), "1 "+v.Title)
 	}
 
 	methodW := 9
@@ -99,23 +103,31 @@ func layout(g *gocui.Gui, a *App) error {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
-		v.Frame = true
+		v.Frame = false
 		renderMethod(v, a)
 	} else {
 		renderMethod(v, a)
+	}
+	{
+		focused := a.activePanel == panelURL && !a.subFocus
+		drawBorder(g, rightX0, 0, rightX0+methodW, 2, borderColor(focused), "")
 	}
 
 	if v, err := g.SetView("url", rightX0+methodW+1, 0, maxX-1, 2); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
-		v.Frame = true
+		v.Frame = false
 		v.Title = "URL"
 		v.Editable = true
 		setViewText(v, a.urlValue)
 		if err := g.SetCurrentView("url"); err != nil {
 			return err
 		}
+	}
+	{
+		focused := a.activePanel == panelURL && !a.subFocus
+		drawBorder(g, rightX0+methodW+1, 0, maxX-1, 2, borderColor(focused), "2 "+focusTitle("URL", focused))
 	}
 
 	if v, err := g.SetView("tabs", rightX0, 3, maxX-1, 5); err != nil {
@@ -143,23 +155,28 @@ func layout(g *gocui.Gui, a *App) error {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
-		v.Frame = true
+		v.Frame = false
 		v.Title = "Headers"
 		v.Editable = a.activeTab != tabAuth
 		setViewText(v, contentText(a, a.activeTab))
 	}
 	if v, err := g.View("content"); err == nil {
 		v.Title = tabNames[a.activeTab]
+		drawBorder(g, rightX0, 6, maxX-1, contentY1, borderColor(a.subFocus), "3 "+focusTitle(v.Title, a.subFocus))
 	}
 
 	if v, err := g.SetView("response", rightX0, contentY1+1, maxX-1, maxY-3); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
-		v.Frame = true
+		v.Frame = false
 		renderResponse(v, a)
 	} else {
 		v.Title = focusTitle("Response", a.activePanel == panelResponse)
+	}
+	{
+		focused := a.activePanel == panelResponse
+		drawBorder(g, rightX0, contentY1+1, maxX-1, maxY-3, borderColor(focused), "4 "+focusTitle("Response", focused))
 	}
 
 	if v, err := g.SetView("status", 0, maxY-2, maxX-1, maxY); err != nil {
@@ -179,13 +196,16 @@ func layout(g *gocui.Gui, a *App) error {
 			if err != gocui.ErrUnknownView {
 				return err
 			}
-			v.Frame = true
+			v.Frame = false
 			v.Editable = a.promptMode != "confirmDelete"
 			setViewText(v, a.promptText)
 			renderPrompt(v, a)
 			if err := g.SetCurrentView("prompt"); err != nil {
 				return err
 			}
+		}
+		if v, err := g.View("prompt"); err == nil {
+			drawBorder(g, x0, y0, x0+w, y0+h, colorPrimary, v.Title)
 		}
 	} else {
 		if _, err := g.View("prompt"); err == nil {
