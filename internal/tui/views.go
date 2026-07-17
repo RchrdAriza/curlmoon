@@ -114,7 +114,7 @@ func layout(g *gocui.Gui, a *App) error {
 	}
 	if v, err := g.View("sidebar"); err == nil {
 		focused := a.activePanel == panelSidebar
-		drawBorder(g, 0, 0, sidebarW, maxY-4, borderColor(focused), "[1] "+v.Title)
+		drawBorder(g, 0, 0, sidebarW, maxY-4, borderColor(focused), "[^S] "+v.Title)
 	}
 
 	methodW := 9
@@ -150,7 +150,7 @@ func layout(g *gocui.Gui, a *App) error {
 	}
 	{
 		focused := a.activePanel == panelURL && !a.subFocus
-		drawBorder(g, rightX0+methodW+1, 0, maxX-1, 2, borderColor(focused), "[2] "+focusTitle("URL", focused))
+		drawBorder(g, rightX0+methodW+1, 0, maxX-1, 2, borderColor(focused), "[^U] "+focusTitle("URL", focused))
 	}
 
 	if v, err := g.SetView("tabs", rightX0, 3, maxX-1, 5); err != nil {
@@ -190,7 +190,7 @@ func layout(g *gocui.Gui, a *App) error {
 		} else {
 			v.Title = tabNames[a.activeTab]
 		}
-		drawBorder(g, rightX0, 6, maxX-1, contentY1, borderColor(a.subFocus), "[3] "+focusTitle(v.Title, a.subFocus))
+		drawBorder(g, rightX0, 6, maxX-1, contentY1, borderColor(a.subFocus), "[^B] "+focusTitle(v.Title, a.subFocus))
 	}
 
 	if a.envEditPending {
@@ -212,7 +212,7 @@ func layout(g *gocui.Gui, a *App) error {
 	}
 	{
 		focused := a.activePanel == panelResponse
-		drawBorder(g, rightX0, contentY1+1, maxX-1, maxY-4, borderColor(focused), "[4] "+focusTitle("Response", focused))
+		drawBorder(g, rightX0, contentY1+1, maxX-1, maxY-4, borderColor(focused), "[^E] "+focusTitle("Response", focused))
 	}
 
 	if v, err := g.SetView("status", 0, maxY-3, maxX-1, maxY); err != nil {
