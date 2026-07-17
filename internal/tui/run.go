@@ -7,9 +7,10 @@ import (
 )
 
 // Run builds the persistence-backed app and drives it through gocui's main
-// loop until the user quits.
-func Run(store *collection.Store) error {
-	a := NewAppWithStore(store)
+// loop until the user quits. extra collections are added in memory only for
+// this run (see NewAppWithStore).
+func Run(store *collection.Store, extra ...*collection.Collection) error {
+	a := NewAppWithStore(store, extra...)
 
 	g := gocui.NewGui()
 	if err := g.Init(); err != nil {

@@ -119,17 +119,16 @@ func NewApp() *App {
 }
 
 // NewAppWithStore builds the real, persistence-backed app: collections are
-// loaded from store (seeded with example collections on first run) and the
-// last editor session is restored.
-func NewAppWithStore(store *collection.Store) *App {
+// loaded from store and the last editor session is restored. extra
+// collections (e.g. --demo examples) are appended in memory only — they are
+// not written to store unless the user explicitly edits them, so they don't
+// outlive the session.
+func NewAppWithStore(store *collection.Store, extra ...*collection.Collection) *App {
 	a := NewApp()
 	a.store = store
 
 	cols, _ := store.LoadAll()
-	a.collections = cols
-	if len(a.collections) == 0 {
-		a.seedDefaultCollections()
-	}
+	a.collections = append(cols, extra...)
 
 	a.envStore = environment.NewStore(store.BaseDir)
 	a.environments, _ = a.envStore.LoadAll()
@@ -141,33 +140,6 @@ func NewAppWithStore(store *collection.Store) *App {
 	a.rebuildSidebar()
 	a.restoreSession()
 	return a
-}
-
-func (a *App) seedDefaultCollections() {
-	seed := []struct {
-		name  string
-		items []collection.Item
-	}{
-		{"httpbin.org", []collection.Item{
-			collection.NewRequestItem("GET /get", "GET", "https://httpbin.org/get", nil, "", ""),
-			collection.NewRequestItem("POST /post", "POST", "https://httpbin.org/post", nil, "", ""),
-			collection.NewRequestItem("PUT /put", "PUT", "https://httpbin.org/put", nil, "", ""),
-			collection.NewRequestItem("DELETE /delete", "DELETE", "https://httpbin.org/delete", nil, "", ""),
-		}},
-		{"JSON Placeholder", []collection.Item{
-			collection.NewRequestItem("GET /todos/1", "GET", "https://jsonplaceholder.typicode.com/todos/1", nil, "", ""),
-			collection.NewRequestItem("GET /posts", "GET", "https://jsonplaceholder.typicode.com/posts", nil, "", ""),
-		}},
-		{"GitHub API", []collection.Item{
-			collection.NewRequestItem("GET /zen", "GET", "https://api.github.com/zen", nil, "", ""),
-		}},
-	}
-	for _, s := range seed {
-		c := collection.NewCollection(s.name)
-		c.Item = s.items
-		_ = a.store.Save(c)
-		a.collections = append(a.collections, c)
-	}
 }
 
 // sidebarFolderKey returns a stable identifier for a folder entry's

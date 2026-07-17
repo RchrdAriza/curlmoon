@@ -51,8 +51,20 @@ curlmoon
 ```
 
 Data is stored under `~/.curlmoon/` (collections, environments, history,
-session). No config needed to get started — launching with no data creates
-a couple of example collections to explore.
+session). curlmoon starts empty by default — bring your own collections and
+environments, or pass `--demo` to explore with a few example collections.
+
+```bash
+curlmoon --demo                          # try it with example collections (httpbin.org, etc.)
+curlmoon -c my-api.postman_collection.json   # import a Postman v2.1 collection
+curlmoon -e prod.env                     # import a .env file as an environment (made active)
+curlmoon -c a.json -c b.json -e local.env --demo   # combine as needed
+```
+
+Imported collections (`-c`) and environments (`-e`) are persisted into
+`~/.curlmoon/`, same as anything created from the TUI. `--demo` collections
+are **not** persisted — they exist only for that run, so they won't clutter
+your sidebar on the next launch.
 
 See [docs/USAGE.md](docs/USAGE.md) for the full guide: panels, keybindings,
 variables, auth, and the collection file format.

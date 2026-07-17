@@ -1,6 +1,8 @@
 package collection
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -35,6 +37,61 @@ func TestStore_CreateDuplicateFails(t *testing.T) {
 	}
 	if _, err := s.Create("Dup"); err == nil {
 		t.Error("expected duplicate create to fail")
+	}
+}
+
+func TestExampleCollections(t *testing.T) {
+	cols := ExampleCollections()
+	if len(cols) != 3 {
+		t.Fatalf("expected 3 example collections, got %d", len(cols))
+	}
+
+	s := NewStore(t.TempDir())
+	names, err := s.List()
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(names) != 0 {
+		t.Errorf("expected ExampleCollections to not touch the store, got %v", names)
+	}
+}
+
+func TestStore_Import(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "imported.json")
+	body := `{"info":{"name":"Imported API"},"item":[{"name":"Ping","request":{"method":"GET","url":{"raw":"https://example.com/ping"}}}]}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	s := NewStore(t.TempDir())
+	c, err := s.Import(path)
+	if err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+	if c.Info.Name != "Imported API" {
+		t.Errorf("expected name Imported API, got %s", c.Info.Name)
+	}
+
+	loaded, err := s.Load("Imported API")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(loaded.Item) != 1 || loaded.Item[0].Request.URL.Raw != "https://example.com/ping" {
+		t.Errorf("expected imported item to round-trip, got %v", loaded.Item)
+	}
+}
+
+func TestStore_ImportMissingNameFails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "noname.json")
+	if err := os.WriteFile(path, []byte(`{"info":{},"item":[]}`), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	s := NewStore(t.TempDir())
+	if _, err := s.Import(path); err == nil {
+		t.Error("expected import of collection without a name to fail")
 	}
 }
 

@@ -147,6 +147,58 @@ func (s *Store) Delete(name string) error {
 	return err
 }
 
+// ExampleCollections builds a handful of ready-to-use example collections
+// (httpbin.org, JSON Placeholder, GitHub API) in memory. Intended for
+// --demo: the caller decides whether to persist them, and by default they
+// only live for the current session.
+func ExampleCollections() []*Collection {
+	examples := []struct {
+		name  string
+		items []Item
+	}{
+		{"httpbin.org", []Item{
+			NewRequestItem("GET /get", "GET", "https://httpbin.org/get", nil, "", ""),
+			NewRequestItem("POST /post", "POST", "https://httpbin.org/post", nil, "", ""),
+			NewRequestItem("PUT /put", "PUT", "https://httpbin.org/put", nil, "", ""),
+			NewRequestItem("DELETE /delete", "DELETE", "https://httpbin.org/delete", nil, "", ""),
+		}},
+		{"JSON Placeholder", []Item{
+			NewRequestItem("GET /todos/1", "GET", "https://jsonplaceholder.typicode.com/todos/1", nil, "", ""),
+			NewRequestItem("GET /posts", "GET", "https://jsonplaceholder.typicode.com/posts", nil, "", ""),
+		}},
+		{"GitHub API", []Item{
+			NewRequestItem("GET /zen", "GET", "https://api.github.com/zen", nil, "", ""),
+		}},
+	}
+	cols := make([]*Collection, len(examples))
+	for i, e := range examples {
+		c := NewCollection(e.name)
+		c.Item = e.items
+		cols[i] = c
+	}
+	return cols
+}
+
+// Import decodes a Postman v2.1-compatible collection JSON file and persists
+// it to the store, overwriting any existing collection with the same name.
+func (s *Store) Import(path string) (*Collection, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var c Collection
+	if err := json.Unmarshal(data, &c); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	if strings.TrimSpace(c.Info.Name) == "" {
+		return nil, fmt.Errorf("%s: collection has no info.name", path)
+	}
+	if err := s.Save(&c); err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
 // Rename changes a collection's display name and its backing file.
 func (s *Store) Rename(oldName, newName string) error {
 	if strings.TrimSpace(newName) == "" {

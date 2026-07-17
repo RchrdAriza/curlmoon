@@ -1,5 +1,16 @@
 # curlmoon usage guide
 
+## CLI flags
+
+| Flag | Repeatable | Effect |
+|---|---|---|
+| `-c`, `--collection FILE` | yes | Import a Postman v2.1 collection JSON file, persisted to `~/.curlmoon/collections/` (overwrites a collection with the same `info.name`) |
+| `-e`, `--env FILE` | yes | Import a `.env` file (`KEY=VALUE` per line) as an environment named after the file, persisted to `~/.curlmoon/environments/`. The last one imported becomes the active environment |
+| `--demo` | — | Add example collections (httpbin.org, JSON Placeholder, GitHub API) for this run only — not persisted to `~/.curlmoon/` |
+
+`.env` files support blank lines, `#` comments, an optional leading
+`export `, and single/double-quoted values.
+
 ## Layout
 
 ```
@@ -156,9 +167,10 @@ Everything lives under `~/.curlmoon/`:
 | `history.json` | The last 50 sent requests |
 | `session.json` | The editor state (method, URL, tabs, active request) restored on next launch |
 
-curlmoon seeds a couple of example collections the first time it runs
-against an empty `~/.curlmoon/`, so there's something to look at
-immediately.
+curlmoon starts with nothing seeded by default. Pass `--demo` to try it with
+a couple of example collections for that run only (not persisted), or
+`-c`/`-e` to import your own, which do get saved to `~/.curlmoon/` — see
+[CLI flags](#cli-flags).
 
 ## Full keybinding reference
 

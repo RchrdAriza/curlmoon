@@ -1,6 +1,10 @@
 package environment
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestResolve(t *testing.T) {
 	vars := map[string]string{"host": "example.com", "id": "42"}
@@ -36,6 +40,64 @@ func TestEnvironment_Vars_SkipsDisabled(t *testing.T) {
 	}
 	if _, ok := vars["b"]; ok {
 		t.Error("expected disabled var b to be excluded")
+	}
+}
+
+func TestParseDotenv(t *testing.T) {
+	data := []byte("# comment\n\nexport BASE_URL=https://example.com\nAPI_KEY=\"secret value\"\nTOKEN='abc123'\n")
+	values, err := ParseDotenv(data)
+	if err != nil {
+		t.Fatalf("ParseDotenv failed: %v", err)
+	}
+	want := map[string]string{
+		"BASE_URL": "https://example.com",
+		"API_KEY":  "secret value",
+		"TOKEN":    "abc123",
+	}
+	if len(values) != len(want) {
+		t.Fatalf("expected %d values, got %v", len(want), values)
+	}
+	for _, kv := range values {
+		if !kv.Enabled {
+			t.Errorf("expected %s to be enabled", kv.Key)
+		}
+		if kv.Value != want[kv.Key] {
+			t.Errorf("expected %s=%s, got %s", kv.Key, want[kv.Key], kv.Value)
+		}
+	}
+}
+
+func TestParseDotenv_InvalidLine(t *testing.T) {
+	if _, err := ParseDotenv([]byte("not-a-valid-line")); err == nil {
+		t.Error("expected error for line without '='")
+	}
+}
+
+func TestStore_ImportDotenv(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "prod.env")
+	if err := os.WriteFile(path, []byte("HOST=prod.example.com\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	s := NewStore(t.TempDir())
+	env, err := s.ImportDotenv(path)
+	if err != nil {
+		t.Fatalf("ImportDotenv failed: %v", err)
+	}
+	if env.Name != "prod" {
+		t.Errorf("expected env name derived from file name, got %s", env.Name)
+	}
+	if env.Vars()["HOST"] != "prod.example.com" {
+		t.Errorf("expected HOST var, got %v", env.Vars())
+	}
+
+	loaded, err := s.LoadAll()
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Name != "prod" {
+		t.Errorf("expected imported env persisted, got %v", loaded)
 	}
 }
 

@@ -189,6 +189,58 @@ func (s *Store) Rename(oldName, newName string) error {
 	return nil
 }
 
+// ParseDotenv parses KEY=VALUE lines in the style of a .env file: blank
+// lines and lines starting with '#' are skipped, an optional leading
+// "export " is stripped, and values may be wrapped in matching single or
+// double quotes.
+func ParseDotenv(data []byte) ([]KeyVal, error) {
+	var values []KeyVal
+	for i, rawLine := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(rawLine)
+		line = strings.TrimRight(line, "\r")
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			return nil, fmt.Errorf("line %d: expected KEY=VALUE, got %q", i+1, rawLine)
+		}
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return nil, fmt.Errorf("line %d: empty key", i+1)
+		}
+		value = strings.TrimSpace(value)
+		if len(value) >= 2 {
+			if (value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'') {
+				value = value[1 : len(value)-1]
+			}
+		}
+		values = append(values, KeyVal{Key: key, Value: value, Enabled: true})
+	}
+	return values, nil
+}
+
+// ImportDotenv reads a .env file and persists it as an environment named
+// after the file (its base name without extension), overwriting any
+// existing environment with that name.
+func (s *Store) ImportDotenv(path string) (*Environment, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	values, err := ParseDotenv(data)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	env := &Environment{Name: name, Values: values}
+	if err := s.Save(env); err != nil {
+		return nil, err
+	}
+	return env, nil
+}
+
 func (s *Store) activePath() string {
 	return filepath.Join(s.BaseDir, "active_environment.json")
 }

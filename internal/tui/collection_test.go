@@ -5,12 +5,30 @@ import (
 	"testing"
 )
 
-func TestNewAppWithStore_SeedsDefaultCollections(t *testing.T) {
+func TestNewAppWithStore_NoAutomaticSeeding(t *testing.T) {
 	store := collection.NewStore(t.TempDir())
 	a := NewAppWithStore(store)
 
+	if len(a.collections) != 0 {
+		t.Fatalf("expected no collections on an empty store, got %d", len(a.collections))
+	}
+
+	names, err := store.List()
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(names) != 0 {
+		t.Errorf("expected nothing persisted to disk, got %v", names)
+	}
+}
+
+func TestNewAppWithStore_ExtraCollectionsAreSessionOnly(t *testing.T) {
+	store := collection.NewStore(t.TempDir())
+	demo := collection.ExampleCollections()
+
+	a := NewAppWithStore(store, demo...)
 	if len(a.collections) != 3 {
-		t.Fatalf("expected 3 seeded collections, got %d", len(a.collections))
+		t.Fatalf("expected 3 in-memory collections, got %d", len(a.collections))
 	}
 	if len(a.sidebar) == 0 {
 		t.Fatal("expected sidebar to be populated from collections")
@@ -20,8 +38,8 @@ func TestNewAppWithStore_SeedsDefaultCollections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
 	}
-	if len(names) != 3 {
-		t.Errorf("expected seeded collections persisted to disk, got %v", names)
+	if len(names) != 0 {
+		t.Errorf("expected demo collections to not be persisted, got %v", names)
 	}
 }
 
@@ -82,6 +100,7 @@ func TestSidebar_CreateCollection(t *testing.T) {
 
 func TestSidebar_SaveRequestIntoCollection(t *testing.T) {
 	store := collection.NewStore(t.TempDir())
+	store.Create("My Stuff")
 	a := NewAppWithStore(store)
 	a.urlValue = "https://example.com/save-me"
 	a.sidebarSel = 0 // first entry is a collection root
