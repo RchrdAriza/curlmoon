@@ -51,7 +51,11 @@ func renderSidebar(v *gocui.View, a *App) {
 			marker = "> "
 		}
 		if item.isFolder {
-			line := marker + prefix + "[+] " + item.name
+			icon := "[-]"
+			if a.collapsed[sidebarFolderKey(item)] {
+				icon = "[+]"
+			}
+			line := marker + prefix + icon + " " + item.name
 			b.WriteString(ansiWrap(line, colorPrimary, true))
 		} else {
 			meth := ansiWrap(fmt.Sprintf("%-6s", item.method), methodColor(item.method), true)
@@ -94,7 +98,7 @@ func footerHints(a *App) string {
 	}
 	switch a.activePanel {
 	case panelSidebar:
-		return "↑↓/jk navigate  ·  Enter open  ·  n new  ·  a add request  ·  r rename  ·  d delete  ·  v edit vars  ·  Tab next panel  ·  q quit"
+		return "↑↓/jk navigate  ·  Enter open/toggle  ·  n new  ·  a add request  ·  r rename  ·  d delete  ·  v edit vars  ·  Tab next panel  ·  q quit"
 	case panelURL:
 		return "↑↓ change method  ·  ←→ switch tab  ·  Enter edit content  ·  Ctrl+R send  ·  Tab next panel  ·  Alt+1-4 jump panel"
 	case panelResponse:

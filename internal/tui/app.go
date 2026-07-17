@@ -51,6 +51,7 @@ type App struct {
 	sidebar    []sidebarEntry
 	sidebarSel int
 	sidebarOff int
+	collapsed  map[string]bool // folder key -> collapsed, see sidebarFolderKey
 
 	urlValue    string
 	methodIndex int
@@ -110,6 +111,7 @@ func NewApp() *App {
 		activeTab:   tabHeaders,
 		authText:    defaultAuthText,
 		envEditIdx:  -1,
+		collapsed:   make(map[string]bool),
 		statusMsg:   "Ready — Tab switches panels, Enter to edit fields",
 	}
 }
@@ -166,36 +168,61 @@ func (a *App) seedDefaultCollections() {
 	}
 }
 
+// sidebarFolderKey returns a stable identifier for a folder entry's
+// collapsed/expanded state, independent of where it currently sits in the
+// flattened sidebar slice (which gets rebuilt from scratch on every change).
+func sidebarFolderKey(e sidebarEntry) string {
+	switch e.section {
+	case "env":
+		return "env"
+	case "history":
+		return "history"
+	default:
+		return fmt.Sprintf("coll:%d:%v", e.collIdx, e.itemPath)
+	}
+}
+
 // rebuildSidebar flattens the in-memory collections tree, plus environments
-// and history when present, into sidebar rows.
+// and history when present, into sidebar rows. Children of a collapsed
+// folder are omitted so the user can shrink the tree to reduce visual
+// clutter; the folder row itself always stays visible.
 func (a *App) rebuildSidebar() {
 	var entries []sidebarEntry
 	for ci, c := range a.collections {
-		entries = append(entries, sidebarEntry{name: c.Info.Name, isFolder: true, collIdx: ci})
-		entries = append(entries, flattenItems(c.Item, ci, nil, 1)...)
+		root := sidebarEntry{name: c.Info.Name, isFolder: true, collIdx: ci}
+		entries = append(entries, root)
+		if !a.collapsed[sidebarFolderKey(root)] {
+			entries = append(entries, flattenItems(a, c.Item, ci, nil, 1)...)
+		}
 	}
 
 	if a.envStore != nil {
-		entries = append(entries, sidebarEntry{name: "Environments", isFolder: true, section: "env"})
-		for i, env := range a.environments {
-			name := env.Name
-			if env.Name == a.activeEnvName {
-				name = "● " + name
+		envRoot := sidebarEntry{name: "Environments", isFolder: true, section: "env"}
+		entries = append(entries, envRoot)
+		if !a.collapsed[sidebarFolderKey(envRoot)] {
+			for i, env := range a.environments {
+				name := env.Name
+				if env.Name == a.activeEnvName {
+					name = "● " + name
+				}
+				entries = append(entries, sidebarEntry{name: name, indent: 1, section: "env", envIdx: i})
 			}
-			entries = append(entries, sidebarEntry{name: name, indent: 1, section: "env", envIdx: i})
 		}
 	}
 
 	if a.historyStore != nil {
-		entries = append(entries, sidebarEntry{name: "History", isFolder: true, section: "history"})
-		for i, h := range a.historyEntries {
-			label := h.URL
-			if h.StatusCode > 0 {
-				label = fmt.Sprintf("%s (%d)", label, h.StatusCode)
-			} else if h.Err != "" {
-				label = label + " (error)"
+		histRoot := sidebarEntry{name: "History", isFolder: true, section: "history"}
+		entries = append(entries, histRoot)
+		if !a.collapsed[sidebarFolderKey(histRoot)] {
+			for i, h := range a.historyEntries {
+				label := h.URL
+				if h.StatusCode > 0 {
+					label = fmt.Sprintf("%s (%d)", label, h.StatusCode)
+				} else if h.Err != "" {
+					label = label + " (error)"
+				}
+				entries = append(entries, sidebarEntry{name: label, method: h.Method, indent: 1, section: "history", histIdx: i})
 			}
-			entries = append(entries, sidebarEntry{name: label, method: h.Method, indent: 1, section: "history", histIdx: i})
 		}
 	}
 
@@ -208,13 +235,16 @@ func (a *App) rebuildSidebar() {
 	}
 }
 
-func flattenItems(items []collection.Item, collIdx int, parentPath []int, indent int) []sidebarEntry {
+func flattenItems(a *App, items []collection.Item, collIdx int, parentPath []int, indent int) []sidebarEntry {
 	var out []sidebarEntry
 	for i, it := range items {
 		path := append(append([]int{}, parentPath...), i)
 		if it.IsFolder() {
-			out = append(out, sidebarEntry{name: it.Name, isFolder: true, indent: indent, collIdx: collIdx, itemPath: path})
-			out = append(out, flattenItems(it.Item, collIdx, path, indent+1)...)
+			folder := sidebarEntry{name: it.Name, isFolder: true, indent: indent, collIdx: collIdx, itemPath: path}
+			out = append(out, folder)
+			if !a.collapsed[sidebarFolderKey(folder)] {
+				out = append(out, flattenItems(a, it.Item, collIdx, path, indent+1)...)
+			}
 		} else {
 			out = append(out, sidebarEntry{
 				name: it.Name, method: it.Request.Method, url: it.Request.URL.Raw,
@@ -455,29 +485,31 @@ func (a *App) MoveSidebarSel(delta int, maxVisible int) {
 }
 
 // SelectSidebarEntry loads the currently selected sidebar request (if any)
-// into the URL/method fields and focuses the URL panel. Returns true if a
-// request was loaded.
+// into the URL/method fields and focuses the URL panel. If the selected
+// entry is a folder, it toggles that folder's collapsed state instead.
+// Returns true if a request was loaded.
 func (a *App) SelectSidebarEntry() bool {
 	if len(a.sidebar) == 0 {
 		return false
 	}
 	item := a.sidebar[a.sidebarSel]
 
+	if item.isFolder {
+		key := sidebarFolderKey(item)
+		a.collapsed[key] = !a.collapsed[key]
+		a.rebuildSidebar()
+		return false
+	}
+
 	if item.section == "env" {
-		if item.isFolder {
-			return false
-		}
 		a.toggleActiveEnvironment(item.envIdx)
 		return false
 	}
 	if item.section == "history" {
-		if item.isFolder {
-			return false
-		}
 		return a.loadHistoryEntry(item.histIdx)
 	}
 
-	if item.isFolder || item.url == "" {
+	if item.url == "" {
 		return false
 	}
 	a.urlValue = item.url
