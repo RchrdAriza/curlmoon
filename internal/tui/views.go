@@ -232,7 +232,16 @@ func layout(g *gocui.Gui, a *App) error {
 			if err != gocui.ErrUnknownView {
 				return err
 			}
-			v.Frame = false
+			// Unlike every other panel, the prompt floats on top of views
+			// that were laid out (and painted) earlier this frame, so it
+			// can't use the drawBorder-during-layout trick: those views
+			// redraw their own full content after layout() returns and
+			// would paint right over a manually-drawn border. Using
+			// gocui's native Frame keeps the border/title tied to this
+			// view's own draw call, which — since "prompt" is appended
+			// last to g.views — always happens after (on top of)
+			// everything underneath it.
+			v.Frame = true
 			v.Editable = a.promptMode != "confirmDelete"
 			setViewText(v, a.promptText)
 			renderPrompt(v, a)
@@ -240,9 +249,11 @@ func layout(g *gocui.Gui, a *App) error {
 				return err
 			}
 		}
-		if v, err := g.View("prompt"); err == nil {
-			drawBorder(g, x0, y0, x0+w, y0+h, colorPrimary, v.Title)
-		}
+		// g.FgColor is read at draw time by gocui's own frame/title
+		// rendering, which runs after layout() returns — so setting it
+		// here (with no restore) is what actually colors the prompt's
+		// border, unlike drawBorder's color param used elsewhere.
+		g.FgColor = colorPrimary
 	} else {
 		if _, err := g.View("prompt"); err == nil {
 			_ = g.DeleteView("prompt")
