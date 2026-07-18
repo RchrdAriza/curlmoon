@@ -105,12 +105,11 @@ type App struct {
 	store       *collection.Store
 	collections []*collection.Collection
 
-	envStore       *environment.Store
-	environments   []*environment.Environment
-	activeEnvName  string
-	envEditIdx     int    // index into environments currently open in the content editor; -1 when not editing
-	envEditText    string // live buffer for the environment being edited
-	envEditPending bool   // true right after StartEnvEdit, until layout() has moved focus into "content"
+	envStore      *environment.Store
+	environments  []*environment.Environment
+	activeEnvName string
+	envEditIdx    int    // index into environments open in the floating "envedit" overlay; -1 when closed
+	envEditText   string // live buffer for the environment being edited
 
 	historyStore   *history.Store
 	historyEntries []history.Entry
@@ -731,8 +730,11 @@ func (a *App) loadHistoryEntry(idx int) bool {
 	return true
 }
 
-// StartEnvEdit opens the content editor pre-filled with the given
+// StartEnvEdit opens the floating environment-variables overlay (see the
+// "envedit" view in layout, views.go) pre-filled with the given
 // environment's variables, formatted as "Key: Value" lines like headers.
+// It's a separate overlay rather than the shared request "content" editor
+// so editing variables doesn't look like just another request tab.
 func (a *App) StartEnvEdit(envIdx int) bool {
 	if envIdx < 0 || envIdx >= len(a.environments) {
 		return false
@@ -744,8 +746,6 @@ func (a *App) StartEnvEdit(envIdx int) bool {
 	}
 	a.envEditIdx = envIdx
 	a.envEditText = serializeKV(pairs)
-	a.envEditPending = true
-	a.subFocus = true
 	a.statusMsg = fmt.Sprintf("Editing variables for %q — Esc to save", env.Name)
 	return true
 }
@@ -768,7 +768,6 @@ func (a *App) SaveEnvEdit() {
 	}
 	a.envEditIdx = -1
 	a.envEditText = ""
-	a.subFocus = false
 	a.statusMsg = fmt.Sprintf("Saved variables for %q", env.Name)
 }
 

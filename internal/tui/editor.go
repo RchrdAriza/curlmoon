@@ -20,8 +20,7 @@ type appEditor struct{ app *App }
 var bracketClosers = map[rune]rune{'{': '}', '[': ']', '(': ')'}
 
 func (e *appEditor) Edit(v *gocui.View, key gocui.Key, ch rune, mod gocui.Modifier) {
-	jsonBody := v.Name() == "content" && e.app.envEditIdx < 0 &&
-		e.app.activeTab == tabBody && e.app.bodyType == 1
+	jsonBody := v.Name() == "content" && e.app.activeTab == tabBody && e.app.bodyType == 1
 
 	if key == gocui.KeyEnter {
 		switch v.Name() {

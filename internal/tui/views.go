@@ -50,19 +50,6 @@ func loadContentTab(g *gocui.Gui, a *App) {
 	v.SetOrigin(0, 0)
 }
 
-// loadEnvEditor overwrites the "content" view with the variables of the
-// environment currently open for editing (see App.StartEnvEdit).
-func loadEnvEditor(g *gocui.Gui, a *App) {
-	v, err := g.View("content")
-	if err != nil {
-		return
-	}
-	v.Editable = true
-	setViewText(v, a.envEditText)
-	v.SetCursor(0, 0)
-	v.SetOrigin(0, 0)
-}
-
 // syncFromViews pulls live-edited text out of the editable gocui views
 // (url/content) and back into the App fields that buildURL/buildHeaders/
 // buildBody/saveSession read from. Editable views are the source of truth
@@ -77,10 +64,6 @@ func syncFromViews(g *gocui.Gui, a *App) {
 		return
 	}
 	text := trimTrailingNewline(v.Buffer())
-	if a.envEditIdx >= 0 {
-		a.envEditText = text
-		return
-	}
 	switch a.activeTab {
 	case tabHeaders:
 		a.headersText = text
@@ -216,9 +199,7 @@ func layout(g *gocui.Gui, a *App) error {
 		setViewText(v, displayContentText(a, a.activeTab))
 	}
 	if v, err := g.View("content"); err == nil {
-		if a.envEditIdx >= 0 {
-			v.Title = "Env: " + a.environments[a.envEditIdx].Name
-		} else if a.activeTab == tabBody {
+		if a.activeTab == tabBody {
 			v.Title = "Body (" + bodyTypes[a.bodyType] + ")"
 		} else if a.activeTab == tabAuth {
 			v.Title = "Auth (" + authTypes[a.authType] + ")"
@@ -226,14 +207,6 @@ func layout(g *gocui.Gui, a *App) error {
 			v.Title = tabNames[a.activeTab]
 		}
 		drawBorder(g, rightX0, 6, maxX-1, contentY1, borderColor(a.subFocus), "[^B] "+focusTitle(v.Title, a.subFocus))
-	}
-
-	if a.envEditPending {
-		a.envEditPending = false
-		loadEnvEditor(g, a)
-		if err := g.SetCurrentView("content"); err != nil {
-			return err
-		}
 	}
 
 	if a.contentFocusPending {
@@ -300,6 +273,42 @@ func layout(g *gocui.Gui, a *App) error {
 	} else {
 		if _, err := g.View("prompt"); err == nil {
 			_ = g.DeleteView("prompt")
+			_ = g.SetCurrentView(panelSidebar)
+		}
+	}
+
+	// The environment-variables editor is its own floating overlay — like
+	// "prompt"/"codegen"/"help" — rather than reusing the request "content"
+	// view the way it used to. Sharing that view made editing variables
+	// look like just another request tab (Headers/Body/...), which is
+	// exactly the ambiguity a dedicated overlay avoids.
+	if a.envEditIdx >= 0 {
+		w, h := 60, 16
+		if w > maxX-4 {
+			w = maxX - 4
+		}
+		if h > maxY-4 {
+			h = maxY - 4
+		}
+		x0, y0 := (maxX-w)/2, (maxY-h)/2
+		if v, err := g.SetView("envedit", x0, y0, x0+w, y0+h); err != nil {
+			if err != gocui.ErrUnknownView {
+				return err
+			}
+			v.Frame = true
+			v.Editable = true
+			v.Title = "Environment: " + a.environments[a.envEditIdx].Name + " (Esc to save)"
+			setViewText(v, a.envEditText)
+			v.SetCursor(0, 0)
+			v.SetOrigin(0, 0)
+			if err := g.SetCurrentView("envedit"); err != nil {
+				return err
+			}
+		}
+		g.FgColor = currentTheme.Primary
+	} else {
+		if _, err := g.View("envedit"); err == nil {
+			_ = g.DeleteView("envedit")
 			_ = g.SetCurrentView(panelSidebar)
 		}
 	}

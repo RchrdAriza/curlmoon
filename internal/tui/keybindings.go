@@ -244,9 +244,9 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		// Don't call g.SetCurrentView here: gocui redelivers the same
 		// keystroke to the newly-focused view's editor right after this
 		// handler returns, which would type the triggering key into the
-		// content buffer. Instead, just flag the pending switch and let
-		// layout() perform it on the next redraw (same trick used for the
-		// prompt overlay).
+		// envedit buffer. StartEnvEdit just flags the overlay as open;
+		// layout() creates the "envedit" view and focuses it on the next
+		// redraw (same trick used for the prompt/codegen/help overlays).
 		if !a.StartEnvEdit(sel.envIdx) {
 			return nil
 		}
@@ -423,16 +423,6 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 	// --- content (headers/body/params/auth/scripts editor) ---
 	contentEsc := func(g *gocui.Gui, v *gocui.View) error {
 		syncFromViews(g, a)
-		if a.envEditIdx >= 0 {
-			a.SaveEnvEdit()
-			if sv, err := g.View("status"); err == nil {
-				renderStatus(sv, a)
-			}
-			if sbv, err := g.View("sidebar"); err == nil {
-				renderSidebar(sbv, a)
-			}
-			return g.SetCurrentView(panelSidebar)
-		}
 		a.ExitContentEditor()
 		if sv, err := g.View("status"); err == nil {
 			renderStatus(sv, a)
@@ -443,6 +433,22 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		return err
 	}
 	if err := bind(g, a, "content", "sendRequest", sendRequest); err != nil {
+		return err
+	}
+
+	// --- envedit overlay (environment variables) ---
+	envEditSave := func(g *gocui.Gui, v *gocui.View) error {
+		a.envEditText = trimTrailingNewline(v.Buffer())
+		a.SaveEnvEdit()
+		if sv, err := g.View("status"); err == nil {
+			renderStatus(sv, a)
+		}
+		if sbv, err := g.View("sidebar"); err == nil {
+			renderSidebar(sbv, a)
+		}
+		return g.SetCurrentView(panelSidebar)
+	}
+	if err := g.SetKeybinding("envedit", gocui.KeyEsc, gocui.ModNone, envEditSave); err != nil {
 		return err
 	}
 
