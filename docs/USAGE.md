@@ -61,10 +61,14 @@ terminal sends identically, so it doesn't depend on either input mode.
 - `r` — rename the selected collection/request/environment
 - `d` — delete the selected item (confirm with `y`/`n`)
 - `v` — edit an environment's variables (only on an Environment entry)
-- `x` — export the selected collection to a file path you enter (Postman
-  v2.1 JSON, including any GraphQL body and pre-request/test scripts)
-- `i` — import a collection from a file path you enter (same as `-c` at
-  startup, but without restarting)
+- `x` — export the selected collection (Postman v2.1 JSON, including any
+  GraphQL body and pre-request/test scripts). Opens a file browser: navigate
+  to the destination folder (`↑↓`/`jk`, `Enter` to open a folder, `←`/`h`
+  to go up), press `Ctrl+S` to choose it, then confirm/edit the filename
+- `i` — import a collection (same as `-c` at startup, but without
+  restarting). Opens a file browser to pick a `.json` file: navigate with
+  `↑↓`/`jk`, `Enter` opens a folder or imports the highlighted file, `←`/`h`
+  goes up a level, `Esc` cancels
 
 The sidebar has three sections:
 

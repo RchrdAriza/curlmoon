@@ -115,6 +115,12 @@ func renderTabs(v *gocui.View, a *App) {
 // focus right now, so users never have to guess (e.g. that ↑/↓ cycle the
 // HTTP method while the URL panel is focused).
 func footerHints(a *App) string {
+	if a.fbMode == "import" {
+		return "↑↓/jk navigate  ·  Enter open/import  ·  ←/h up a level  ·  Esc cancel"
+	}
+	if a.fbMode == "export" {
+		return "↑↓/jk navigate  ·  Enter open folder  ·  ←/h up a level  ·  Ctrl+S save here  ·  Esc cancel"
+	}
 	if a.showCodegen {
 		return "Tab/Shift+Tab language  ·  Ctrl+G close"
 	}

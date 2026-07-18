@@ -263,15 +263,14 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		if sel.section != "" || len(sel.itemPath) != 0 {
 			return nil
 		}
-		name := a.collections[sel.collIdx].Info.Name
-		a.StartPrompt("exportPath", sel, a.store.BaseDir+"/"+name+".json")
+		a.OpenFileBrowser("export", sel)
 		return nil
 	}
 	sidebarImport := func(g *gocui.Gui, v *gocui.View) error {
 		if a.store == nil {
 			return nil
 		}
-		a.StartPrompt("importPath", sidebarEntry{}, "")
+		a.OpenFileBrowser("import", sidebarEntry{})
 		return nil
 	}
 
@@ -573,6 +572,61 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 	}
 	for _, b := range promptBindings {
 		if err := g.SetKeybinding("prompt", b.key, gocui.ModNone, b.h); err != nil {
+			return err
+		}
+	}
+
+	// --- file browser overlay (import/export) ---
+	fbUp := func(g *gocui.Gui, v *gocui.View) error {
+		a.fbMoveSel(-1)
+		return nil
+	}
+	fbDown := func(g *gocui.Gui, v *gocui.View) error {
+		a.fbMoveSel(1)
+		return nil
+	}
+	fbEnter := func(g *gocui.Gui, v *gocui.View) error {
+		msg, done := a.fbEnter()
+		if done {
+			a.CloseFileBrowser()
+			a.statusMsg = msg
+			if sbv, err := g.View("sidebar"); err == nil {
+				renderSidebar(sbv, a)
+			}
+		}
+		return nil
+	}
+	fbParent := func(g *gocui.Gui, v *gocui.View) error {
+		a.fbParent()
+		return nil
+	}
+	fbCancel := func(g *gocui.Gui, v *gocui.View) error {
+		a.CloseFileBrowser()
+		a.statusMsg = "Cancelled"
+		return nil
+	}
+	fbSaveHere := func(g *gocui.Gui, v *gocui.View) error {
+		a.fbSelectHere()
+		return nil
+	}
+	fbBindings := []struct {
+		key interface{}
+		h   gocui.KeybindingHandler
+	}{
+		{gocui.KeyArrowUp, fbUp},
+		{'k', fbUp},
+		{gocui.KeyArrowDown, fbDown},
+		{'j', fbDown},
+		{gocui.KeyEnter, fbEnter},
+		{gocui.KeyArrowLeft, fbParent},
+		{'h', fbParent},
+		{gocui.KeyBackspace, fbParent},
+		{gocui.KeyBackspace2, fbParent},
+		{gocui.KeyEsc, fbCancel},
+		{gocui.KeyCtrlS, fbSaveHere},
+	}
+	for _, b := range fbBindings {
+		if err := g.SetKeybinding("filebrowser", b.key, gocui.ModNone, b.h); err != nil {
 			return err
 		}
 	}

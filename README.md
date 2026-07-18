@@ -30,7 +30,7 @@ the keyboard.
 - GraphQL body type (query + variables)
 - Pre-request/test scripts (`pm.*` API, powered by [goja](https://github.com/dop251/goja))
 - Code generation: curl, Go, Python, JavaScript (`Ctrl+G`)
-- Export (`x`) / import (`i`) collections from the sidebar, on top of `-c`/`--collection` at startup
+- Export (`x`) / import (`i`) collections from the sidebar via a built-in file browser — navigate the filesystem instead of typing paths — on top of `-c`/`--collection` at startup
 - Request history (last 50 sends, reloadable)
 - JSON syntax-highlighted, scrollable response viewer
 - Session auto-save/restore between runs

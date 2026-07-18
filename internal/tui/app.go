@@ -118,6 +118,15 @@ type App struct {
 	promptTarget sidebarEntry
 	promptText   string
 
+	// file browser overlay, used by import/export instead of typing a path
+	fbMode    string       // "", "import", "export"
+	fbDir     string       // directory currently being browsed
+	fbEntries []fbEntry    // listing of fbDir: parent (..), sub-dirs, then files
+	fbSel     int          // index of the highlighted entry
+	fbOffset  int          // first visible row, for scrolling long listings
+	fbTarget  sidebarEntry // export: which collection is being written out
+	fbErr     string       // transient error (e.g. permission denied on a dir)
+
 	showHelp bool // true while the keybinding help overlay (Ctrl+/) is open
 
 	keymap config.Keymap // action name -> key, see internal/config

@@ -346,6 +346,40 @@ func layout(g *gocui.Gui, a *App) error {
 		}
 	}
 
+	if a.fbMode != "" {
+		w, h := maxX-8, maxY-6
+		if w < 20 {
+			w = maxX
+		}
+		if h < 6 {
+			h = maxY
+		}
+		x0, y0 := (maxX-w)/2, (maxY-h)/2
+		v, err := g.SetView("filebrowser", x0, y0, x0+w, y0+h)
+		if err != nil {
+			if err != gocui.ErrUnknownView {
+				return err
+			}
+			v.Frame = true
+			v.Editable = false
+			if err := g.SetCurrentView("filebrowser"); err != nil {
+				return err
+			}
+		}
+		renderFileBrowser(v, a)
+		g.FgColor = currentTheme.Primary
+	} else {
+		if _, err := g.View("filebrowser"); err == nil {
+			_ = g.DeleteView("filebrowser")
+			// Don't yank focus back to the sidebar if a prompt has already
+			// taken over this frame — export hands off to the exportPath
+			// prompt the instant the browser closes.
+			if a.promptMode == "" {
+				_ = g.SetCurrentView(panelSidebar)
+			}
+		}
+	}
+
 	if a.showHelp {
 		text, contentW, contentH := helpText(a.keymap)
 		w, h := contentW+4, contentH+2

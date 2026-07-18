@@ -339,6 +339,91 @@ func TestConfirmPrompt_ImportPath(t *testing.T) {
 	}
 }
 
+// --- File browser (import/export) ---
+
+func TestFileBrowser_ImportNavigatesAndImports(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatalf("Mkdir failed: %v", err)
+	}
+	importFile := filepath.Join(sub, "import.json")
+	if err := os.WriteFile(importFile, []byte(`{"info":{"name":"Imported"},"item":[]}`), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	a := NewAppWithStore(collection.NewStore(t.TempDir()))
+	a.OpenFileBrowser("import", sidebarEntry{})
+	a.fbNavigate(root)
+
+	// Descend into "sub" (skip the ".." parent entry).
+	for i, e := range a.fbEntries {
+		if e.name == "sub" {
+			a.fbSel = i
+			break
+		}
+	}
+	if _, done := a.fbEnter(); done {
+		t.Fatal("descending into a folder should not finish the browser")
+	}
+	if a.fbDir != sub {
+		t.Fatalf("expected to be in %s, got %s", sub, a.fbDir)
+	}
+
+	// Select the JSON file and import it.
+	for i, e := range a.fbEntries {
+		if e.name == "import.json" {
+			a.fbSel = i
+			break
+		}
+	}
+	msg, done := a.fbEnter()
+	if !done {
+		t.Fatalf("importing a file should finish the browser, err=%q", a.fbErr)
+	}
+	if !strings.Contains(msg, "Imported") {
+		t.Errorf("expected import success message, got %q", msg)
+	}
+	found := false
+	for _, c := range a.collections {
+		if c.Info.Name == "Imported" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected imported collection in a.collections")
+	}
+}
+
+func TestFileBrowser_ExportHandsOffToPrompt(t *testing.T) {
+	dir := t.TempDir()
+	store := collection.NewStore(dir)
+	store.Create("Exportable")
+	a := NewAppWithStore(store)
+
+	sel := a.sidebar[sidebarIndexOf(a, "Exportable")]
+	a.OpenFileBrowser("export", sel)
+	a.fbSelectHere()
+
+	if a.fbMode != "" {
+		t.Error("expected file browser to close after selecting a folder")
+	}
+	if a.promptMode != "exportPath" {
+		t.Fatalf("expected exportPath prompt, got %q", a.promptMode)
+	}
+	if !strings.HasSuffix(a.promptText, "Exportable.json") {
+		t.Errorf("expected prefilled filename, got %q", a.promptText)
+	}
+
+	a.ConfirmPrompt()
+	if !strings.Contains(a.statusMsg, "Exported") {
+		t.Errorf("expected export success, got %q", a.statusMsg)
+	}
+	if _, err := os.Stat(filepath.Join(store.BaseDir, "Exportable.json")); err != nil {
+		t.Errorf("expected exported file to exist: %v", err)
+	}
+}
+
 // --- Keymap wiring ---
 
 func TestNewAppWithStore_LoadsKeymapAndTheme(t *testing.T) {
