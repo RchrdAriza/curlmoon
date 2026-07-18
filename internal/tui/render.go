@@ -132,6 +132,9 @@ func footerHints(a *App) string {
 		if a.activeTab == tabBody {
 			hint += "  ·  Ctrl+Y body type"
 		}
+		if a.activeTab == tabAuth {
+			hint += "  ·  Ctrl+Y auth type"
+		}
 		return hint + "  ·  Ctrl+R send  ·  Ctrl+G code  ·  Ctrl+T theme  ·  Tab next panel  ·  Ctrl+S,U,B,E jump panel  ·  Ctrl+/ help"
 	case panelResponse:
 		return "↑↓ scroll  ·  PgUp/PgDn page  ·  Tab next panel  ·  Ctrl+/ help"
@@ -186,7 +189,7 @@ func renderResponse(v *gocui.View, a *App) {
 		}
 	}
 
-	body := highlightJSON(a.response.Body)
+	body := highlightJSON(prettyJSON(a.response.Body))
 
 	testSummary := renderTestSummary(a)
 
@@ -271,7 +274,7 @@ func helpSections(km config.Keymap) []struct {
 			{"←→, Home/End", "move cursor"},
 			{k("urlMethodUp") + "/" + k("urlMethodDown") + ", Ctrl+K/J", "cycle HTTP method"},
 			{k("urlSwitchTabPrev") + "/" + k("urlSwitchTabNext"), "switch tab (Headers/Body/Auth/Params/Scripts)"},
-			{k("cycleBodyType"), "cycle body type (Body tab only)"},
+			{k("cycleBodyType"), "cycle body type (Body tab) / auth type (Auth tab)"},
 			{k("urlEnterContent"), "edit tab content"},
 			{k("sendRequest"), "send request"},
 		}},

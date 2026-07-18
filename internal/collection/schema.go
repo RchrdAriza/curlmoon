@@ -144,6 +144,11 @@ func (c *Collection) RenameItem(path []int, name string) bool {
 	return renameAt(c.Item, path, name)
 }
 
+// SetMethodAt updates the HTTP method of the request located at path.
+func (c *Collection) SetMethodAt(path []int, method string) bool {
+	return setMethodAt(c.Item, path, method)
+}
+
 func addAt(items []Item, path []int, item Item) ([]Item, bool) {
 	if len(path) == 0 {
 		return append(items, item), true
@@ -194,4 +199,22 @@ func renameAt(items []Item, path []int, name string) bool {
 		return true
 	}
 	return renameAt(items[idx].Item, path[1:], name)
+}
+
+func setMethodAt(items []Item, path []int, method string) bool {
+	if len(path) == 0 {
+		return false
+	}
+	idx := path[0]
+	if idx < 0 || idx >= len(items) {
+		return false
+	}
+	if len(path) == 1 {
+		if items[idx].Request == nil {
+			return false
+		}
+		items[idx].Request.Method = method
+		return true
+	}
+	return setMethodAt(items[idx].Item, path[1:], method)
 }

@@ -1,10 +1,26 @@
 package tui
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 
 	"github.com/jesseduffield/gocui"
 )
+
+// prettyJSON reindents JSON text for display. Requests bodies are sent
+// exactly as typed (this is display-only), so invalid JSON is returned
+// unchanged rather than erroring.
+func prettyJSON(text string) string {
+	if !looksLikeJSON(text) {
+		return text
+	}
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, []byte(text), "", "  "); err != nil {
+		return text
+	}
+	return buf.String()
+}
 
 func highlightJSON(text string) string {
 	if !looksLikeJSON(text) {

@@ -203,6 +203,36 @@ func TestApp_CycleBodyType(t *testing.T) {
 	}
 }
 
+func TestApp_CycleAuthType(t *testing.T) {
+	a := NewApp()
+	if a.authType != authNone {
+		t.Fatalf("expected default authType=None, got %d", a.authType)
+	}
+	for i := 1; i < len(authTypes); i++ {
+		a.CycleAuthType(1)
+		if a.authType != i {
+			t.Fatalf("expected authType=%d, got %d", i, a.authType)
+		}
+	}
+	a.CycleAuthType(1)
+	if a.authType != authNone {
+		t.Errorf("expected wraparound to None, got %d", a.authType)
+	}
+}
+
+func TestApp_CycleAuthType_SeedsPlaceholderOnlyWhenEmpty(t *testing.T) {
+	a := NewApp()
+	a.CycleAuthType(1) // -> Basic
+	if a.authText == "" {
+		t.Fatal("expected Basic placeholder to seed empty authText")
+	}
+	a.authText = "custom text"
+	a.CycleAuthType(1) // -> Bearer
+	if a.authText != "custom text" {
+		t.Errorf("expected existing authText to be preserved, got %q", a.authText)
+	}
+}
+
 // --- Code generation overlay ---
 
 func TestApp_ToggleCodegen(t *testing.T) {

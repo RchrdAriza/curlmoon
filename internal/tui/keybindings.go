@@ -355,13 +355,19 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 	}
 	cycleBodyType := func(delta int) gocui.KeybindingHandler {
 		return func(g *gocui.Gui, v *gocui.View) error {
-			if a.activeTab != tabBody {
-				return nil
-			}
-			a.CycleBodyType(delta)
-			if sv, err := g.View("status"); err == nil {
-				a.statusMsg = fmt.Sprintf("Body type: %s", bodyTypes[a.bodyType])
-				renderStatus(sv, a)
+			switch a.activeTab {
+			case tabBody:
+				a.CycleBodyType(delta)
+				if sv, err := g.View("status"); err == nil {
+					a.statusMsg = fmt.Sprintf("Body type: %s", bodyTypes[a.bodyType])
+					renderStatus(sv, a)
+				}
+			case tabAuth:
+				a.CycleAuthType(delta)
+				if sv, err := g.View("status"); err == nil {
+					a.statusMsg = fmt.Sprintf("Auth type: %s", authTypes[a.authType])
+					renderStatus(sv, a)
+				}
 			}
 			return nil
 		}

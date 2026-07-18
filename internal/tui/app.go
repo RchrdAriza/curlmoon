@@ -74,10 +74,18 @@ type App struct {
 	methodIndex int
 	activeTab   int
 
+	// activeCollIdx/activeItemPath identify the sidebar request currently
+	// loaded into the editor (-1/nil when none, e.g. after loading a history
+	// entry), so CycleMethod can write the new method straight back into the
+	// collection instead of leaving the sidebar showing a stale value.
+	activeCollIdx  int
+	activeItemPath []int
+
 	bodyType    int
 	headersText string
 	paramsText  string
 	bodyText    string
+	authType    int
 	authText    string
 	scriptsText string
 
@@ -133,15 +141,15 @@ func NewApp() *App {
 	}
 
 	return &App{
-		sidebar:     sidebar,
-		activePanel: panelURL,
-		activeTab:   tabHeaders,
-		authText:    defaultAuthText,
-		scriptsText: defaultScriptsText,
-		envEditIdx:  -1,
-		collapsed:   make(map[string]bool),
-		statusMsg:   "Ready — Tab switches panels, Enter to edit fields",
-		keymap:      config.DefaultKeymap(),
+		sidebar:       sidebar,
+		activePanel:   panelURL,
+		activeTab:     tabHeaders,
+		scriptsText:   defaultScriptsText,
+		envEditIdx:    -1,
+		activeCollIdx: -1,
+		collapsed:     make(map[string]bool),
+		statusMsg:     "Ready — Tab switches panels, Enter to edit fields",
+		keymap:        config.DefaultKeymap(),
 	}
 }
 
@@ -285,6 +293,12 @@ func (a *App) restoreSession() {
 	}
 	a.headersText = serializeKV(toKVPairs(sess.Headers))
 	a.paramsText = serializeKV(toKVPairs(sess.Params))
+	for i, at := range authTypes {
+		if at == sess.AuthType {
+			a.authType = i
+			break
+		}
+	}
 	if sess.AuthText != "" {
 		a.authText = sess.AuthText
 	}
@@ -302,6 +316,7 @@ func (a *App) saveSession() {
 		URL:       a.urlValue,
 		BodyType:  bodyTypes[a.bodyType],
 		Body:      a.bodyText,
+		AuthType:  authTypes[a.authType],
 		AuthText:  a.authText,
 		Scripts:   a.scriptsText,
 		ActiveTab: a.activeTab,
@@ -361,7 +376,7 @@ func (a *App) buildHeaders() map[string]string {
 			h["Content-Type"] = "application/x-www-form-urlencoded"
 		}
 	}
-	applyAuth(h, a.authText)
+	applyAuth(h, a.authType, a.authText)
 	return h
 }
 
@@ -501,6 +516,7 @@ func (a *App) recordHistory(errMsg string, statusCode int, elapsed string) {
 // CycleMethod moves the selected HTTP method by delta (wrapping around).
 func (a *App) CycleMethod(delta int) {
 	a.methodIndex = ((a.methodIndex+delta)%len(methods) + len(methods)) % len(methods)
+	a.syncActiveMethod()
 }
 
 // NextTab / PrevTab move the active request tab left/right.
@@ -521,6 +537,18 @@ func (a *App) PrevTab() {
 // while the Body tab is active.
 func (a *App) CycleBodyType(delta int) {
 	a.bodyType = ((a.bodyType+delta)%len(bodyTypes) + len(bodyTypes)) % len(bodyTypes)
+}
+
+// CycleAuthType moves the selected auth type (None/Basic/Bearer/API Key/
+// OAuth2) by delta, wrapping around. Only meaningful while the Auth tab is
+// active. If authText is still empty (untouched), it's seeded with the new
+// type's placeholder so the user sees the expected fields; any text they've
+// already typed is left alone, same as CycleBodyType never touching bodyText.
+func (a *App) CycleAuthType(delta int) {
+	a.authType = ((a.authType+delta)%len(authTypes) + len(authTypes)) % len(authTypes)
+	if a.authText == "" {
+		a.authText = authPlaceholder(a.authType)
+	}
 }
 
 // ToggleCodegen opens/closes the "generate code" overlay (Ctrl+G).
@@ -605,6 +633,8 @@ func (a *App) SelectSidebarEntry() bool {
 		return false
 	}
 	if item.section == "history" {
+		a.activeCollIdx = -1
+		a.activeItemPath = nil
 		return a.loadHistoryEntry(item.histIdx)
 	}
 
@@ -618,9 +648,29 @@ func (a *App) SelectSidebarEntry() bool {
 			break
 		}
 	}
+	a.activeCollIdx = item.collIdx
+	a.activeItemPath = append([]int{}, item.itemPath...)
 	a.activePanel = panelURL
 	a.statusMsg = fmt.Sprintf("Loaded: %s %s", item.method, item.url)
 	return true
+}
+
+// syncActiveMethod writes the current a.methodIndex back into the collection
+// item loaded by SelectSidebarEntry (if any), so the sidebar reflects the
+// method the user actually last selected instead of showing what the request
+// was created with.
+func (a *App) syncActiveMethod() {
+	if a.activeCollIdx < 0 || a.activeCollIdx >= len(a.collections) {
+		return
+	}
+	c := a.collections[a.activeCollIdx]
+	if !c.SetMethodAt(a.activeItemPath, methods[a.methodIndex]) {
+		return
+	}
+	if a.store != nil {
+		_ = a.store.Save(c)
+	}
+	a.rebuildSidebar()
 }
 
 // EnterContentEditor moves focus into the tab content view (headers/body/
@@ -831,6 +881,10 @@ func (a *App) ConfirmPrompt() {
 				c.RemoveItem(target.itemPath)
 				_ = a.store.Save(c)
 				a.statusMsg = "Request deleted"
+				// Deleting shifts sibling indices, so any tracked active item
+				// path could now point at the wrong request.
+				a.activeCollIdx = -1
+				a.activeItemPath = nil
 			}
 		}
 

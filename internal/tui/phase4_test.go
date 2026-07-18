@@ -11,7 +11,7 @@ import (
 
 func TestBuildHeaders_AuthNone(t *testing.T) {
 	a := NewApp()
-	a.authText = "Type: None"
+	a.authType = authNone
 	headers := a.buildHeaders()
 	if _, ok := headers["Authorization"]; ok {
 		t.Errorf("expected no Authorization header, got %v", headers)
@@ -20,7 +20,8 @@ func TestBuildHeaders_AuthNone(t *testing.T) {
 
 func TestBuildHeaders_AuthBasic(t *testing.T) {
 	a := NewApp()
-	a.authText = "Type: Basic\nUsername: alice\nPassword: secret"
+	a.authType = authBasic
+	a.authText = "Username: alice\nPassword: secret"
 	headers := a.buildHeaders()
 	if !strings.HasPrefix(headers["Authorization"], "Basic ") {
 		t.Fatalf("expected Basic auth header, got %v", headers["Authorization"])
@@ -29,7 +30,8 @@ func TestBuildHeaders_AuthBasic(t *testing.T) {
 
 func TestBuildHeaders_AuthBearer(t *testing.T) {
 	a := NewApp()
-	a.authText = "Type: Bearer\nToken: abc123"
+	a.authType = authBearer
+	a.authText = "abc123"
 	headers := a.buildHeaders()
 	if headers["Authorization"] != "Bearer abc123" {
 		t.Errorf("expected Bearer abc123, got %q", headers["Authorization"])
@@ -38,7 +40,8 @@ func TestBuildHeaders_AuthBearer(t *testing.T) {
 
 func TestBuildHeaders_AuthAPIKey(t *testing.T) {
 	a := NewApp()
-	a.authText = "Type: API Key\nKey: X-API-Key\nValue: mykey"
+	a.authType = authAPIKey
+	a.authText = "Key: X-API-Key\nValue: mykey"
 	headers := a.buildHeaders()
 	if headers["X-API-Key"] != "mykey" {
 		t.Errorf("expected X-API-Key=mykey, got %v", headers)
@@ -47,7 +50,8 @@ func TestBuildHeaders_AuthAPIKey(t *testing.T) {
 
 func TestBuildHeaders_AuthOAuth2(t *testing.T) {
 	a := NewApp()
-	a.authText = "Type: OAuth2\nToken: tok"
+	a.authType = authOAuth2
+	a.authText = "tok"
 	headers := a.buildHeaders()
 	if headers["Authorization"] != "Bearer tok" {
 		t.Errorf("expected Bearer tok, got %q", headers["Authorization"])

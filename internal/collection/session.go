@@ -15,6 +15,7 @@ type Session struct {
 	Params    []KeyVal `json:"params,omitempty"`
 	BodyType  string   `json:"body_type,omitempty"`
 	Body      string   `json:"body,omitempty"`
+	AuthType  string   `json:"auth_type,omitempty"`
 	AuthText  string   `json:"auth_text,omitempty"`
 	Scripts   string   `json:"scripts,omitempty"`
 	ActiveTab int      `json:"active_tab"`

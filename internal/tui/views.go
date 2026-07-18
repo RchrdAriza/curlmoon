@@ -208,6 +208,8 @@ func layout(g *gocui.Gui, a *App) error {
 			v.Title = "Env: " + a.environments[a.envEditIdx].Name
 		} else if a.activeTab == tabBody {
 			v.Title = "Body (" + bodyTypes[a.bodyType] + ")"
+		} else if a.activeTab == tabAuth {
+			v.Title = "Auth (" + authTypes[a.authType] + ")"
 		} else {
 			v.Title = tabNames[a.activeTab]
 		}
@@ -234,6 +236,7 @@ func layout(g *gocui.Gui, a *App) error {
 			return err
 		}
 		v.Frame = false
+		v.Wrap = true
 		renderResponse(v, a)
 	} else {
 		v.Title = focusTitle("Response", a.activePanel == panelResponse)
