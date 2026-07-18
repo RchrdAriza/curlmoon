@@ -188,6 +188,8 @@ func sidebarFolderKey(e sidebarEntry) string {
 		return "env"
 	case "history":
 		return "history"
+	case "collections":
+		return "collections"
 	default:
 		return fmt.Sprintf("coll:%d:%v", e.collIdx, e.itemPath)
 	}
@@ -199,11 +201,17 @@ func sidebarFolderKey(e sidebarEntry) string {
 // clutter; the folder row itself always stays visible.
 func (a *App) rebuildSidebar() {
 	var entries []sidebarEntry
-	for ci, c := range a.collections {
-		root := sidebarEntry{name: c.Info.Name, isFolder: true, collIdx: ci}
-		entries = append(entries, root)
-		if !a.collapsed[sidebarFolderKey(root)] {
-			entries = append(entries, flattenItems(a, c.Item, ci, nil, 1)...)
+	if a.store != nil {
+		collRoot := sidebarEntry{name: "Collections", isFolder: true, section: "collections"}
+		entries = append(entries, collRoot)
+		if !a.collapsed[sidebarFolderKey(collRoot)] {
+			for ci, c := range a.collections {
+				root := sidebarEntry{name: c.Info.Name, isFolder: true, collIdx: ci, indent: 1}
+				entries = append(entries, root)
+				if !a.collapsed[sidebarFolderKey(root)] {
+					entries = append(entries, flattenItems(a, c.Item, ci, nil, 2)...)
+				}
+			}
 		}
 	}
 
@@ -638,9 +646,6 @@ func (a *App) SelectSidebarEntry() bool {
 		return a.loadHistoryEntry(item.histIdx)
 	}
 
-	if item.url == "" {
-		return false
-	}
 	a.urlValue = item.url
 	for i, meth := range methods {
 		if meth == item.method {

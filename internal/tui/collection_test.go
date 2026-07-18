@@ -103,7 +103,7 @@ func TestSidebar_SaveRequestIntoCollection(t *testing.T) {
 	store.Create("My Stuff")
 	a := NewAppWithStore(store)
 	a.urlValue = "https://example.com/save-me"
-	a.sidebarSel = 0 // first entry is a collection root
+	a.sidebarSel = 1 // 0 is the "Collections" header, 1 is the first collection root
 
 	a.StartPrompt("newRequest", sidebarEntry{collIdx: a.sidebar[a.sidebarSel].collIdx}, "")
 	if a.promptMode != "newRequest" {
@@ -128,7 +128,7 @@ func TestSidebar_RenameCollection(t *testing.T) {
 	store := collection.NewStore(t.TempDir())
 	store.Create("Old Name")
 	a := NewAppWithStore(store)
-	a.sidebarSel = 0
+	a.sidebarSel = 1 // 0 is the "Collections" header
 
 	sel := a.sidebar[a.sidebarSel]
 	a.StartPrompt("rename", sel, sel.name)
@@ -151,7 +151,7 @@ func TestSidebar_DeleteCollectionWithConfirm(t *testing.T) {
 	store := collection.NewStore(t.TempDir())
 	store.Create("Doomed")
 	a := NewAppWithStore(store)
-	a.sidebarSel = 0
+	a.sidebarSel = 1 // 0 is the "Collections" header
 
 	sel := a.sidebar[a.sidebarSel]
 	a.StartPrompt("confirmDelete", sel, "")
@@ -173,7 +173,7 @@ func TestSidebar_DeleteCollectionCancelled(t *testing.T) {
 	store := collection.NewStore(t.TempDir())
 	store.Create("Safe")
 	a := NewAppWithStore(store)
-	a.sidebarSel = 0
+	a.sidebarSel = 1 // 0 is the "Collections" header
 
 	sel := a.sidebar[a.sidebarSel]
 	a.StartPrompt("confirmDelete", sel, "")
