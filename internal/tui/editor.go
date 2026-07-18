@@ -74,6 +74,9 @@ func (e *appEditor) Edit(v *gocui.View, key gocui.Key, ch rune, mod gocui.Modifi
 	if jsonBody && editModifiesText(key, ch) {
 		recolorJSON(v)
 	}
+	if v.Name() == "url" && editModifiesText(key, ch) {
+		recolorURL(v)
+	}
 }
 
 func isBracketCloser(ch rune) bool {
@@ -193,6 +196,18 @@ func recolorJSON(v *gocui.View) {
 	text := strings.TrimSuffix(v.Buffer(), "\n")
 	v.Clear()
 	fmt.Fprint(v, highlightJSON(text))
+	_ = v.SetOrigin(ox, oy)
+	_ = v.SetCursor(cx, cy)
+}
+
+// recolorURL re-applies {{variable}} highlighting to the URL view after an
+// edit, the same way recolorJSON does for JSON bodies.
+func recolorURL(v *gocui.View) {
+	cx, cy := v.Cursor()
+	ox, oy := v.Origin()
+	text := strings.TrimSuffix(v.Buffer(), "\n")
+	v.Clear()
+	fmt.Fprint(v, highlightURL(text))
 	_ = v.SetOrigin(ox, oy)
 	_ = v.SetCursor(cx, cy)
 }

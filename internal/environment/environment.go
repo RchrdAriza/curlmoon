@@ -37,7 +37,10 @@ func (e *Environment) Vars() map[string]string {
 	return m
 }
 
-var varRe = regexp.MustCompile(`\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}`)
+// VarPattern matches a {{key}} token, capturing the key name. It's exported
+// so callers outside this package (e.g. the TUI's URL highlighting) can
+// locate variable tokens using the same syntax Resolve substitutes.
+var VarPattern = regexp.MustCompile(`\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}`)
 
 // Resolve replaces every {{key}} occurrence in text with vars[key]. Tokens
 // with no matching variable are left untouched.
@@ -45,8 +48,8 @@ func Resolve(text string, vars map[string]string) string {
 	if len(vars) == 0 || !strings.Contains(text, "{{") {
 		return text
 	}
-	return varRe.ReplaceAllStringFunc(text, func(tok string) string {
-		key := varRe.FindStringSubmatch(tok)[1]
+	return VarPattern.ReplaceAllStringFunc(text, func(tok string) string {
+		key := VarPattern.FindStringSubmatch(tok)[1]
 		if v, ok := vars[key]; ok {
 			return v
 		}

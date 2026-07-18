@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"curlmoon/internal/environment"
 	"github.com/jesseduffield/gocui"
 )
 
@@ -81,6 +82,25 @@ func highlightJSON(text string) string {
 			i++
 		}
 	}
+	return out.String()
+}
+
+// highlightURL colors every {{variable}} token in a URL (or any other
+// {{var}}-bearing text, e.g. header values) so unresolved environment
+// substitutions stand out from the surrounding literal text.
+func highlightURL(text string) string {
+	if !strings.Contains(text, "{{") {
+		return text
+	}
+	var out strings.Builder
+	last := 0
+	for _, loc := range environment.VarPattern.FindAllStringIndex(text, -1) {
+		start, end := loc[0], loc[1]
+		out.WriteString(text[last:start])
+		out.WriteString(ansiWrap(text[start:end], currentTheme.Magenta, true))
+		last = end
+	}
+	out.WriteString(text[last:])
 	return out.String()
 }
 

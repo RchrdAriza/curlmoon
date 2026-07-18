@@ -21,9 +21,12 @@ func setViewText(v *gocui.View, text string) {
 // end of it (scrolling the origin so it's visible), matching where you'd
 // want to keep typing after loading a request — gocui otherwise leaves the
 // cursor at (0,0) after a Clear+Write, which put every fresh keystroke at
-// the start of the URL instead of the end.
+// the start of the URL instead of the end. text is highlighted for
+// {{variable}} tokens before writing; the cursor math still uses the plain
+// rune count since ansiWrap's escapes are consumed by gocui without
+// emitting cells (see recolorJSON in editor.go).
 func setURLText(v *gocui.View, text string) {
-	setViewText(v, text)
+	setViewText(v, highlightURL(text))
 	n := len([]rune(text))
 	maxX, _ := v.Size()
 	if maxX < 1 {
