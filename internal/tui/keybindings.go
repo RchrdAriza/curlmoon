@@ -1,8 +1,20 @@
 package tui
 
 import (
+	"fmt"
+
 	"github.com/jesseduffield/gocui"
 )
+
+// bind resolves action's key through a.keymap (falling back to its default
+// if unset or unparsable) and registers it on view. This is the only place
+// keybindings.go touches raw key literals for user-configurable actions —
+// everything else goes through here so ~/.curlmoon/keybindings.json can
+// override it.
+func bind(g *gocui.Gui, a *App, view, action string, h gocui.KeybindingHandler) error {
+	key, mod := a.keymap.Key(action)
+	return g.SetKeybinding(view, key, mod, h)
+}
 
 // setupKeybindings wires every keyboard shortcut curlmoon responds to onto
 // the App instance. Handlers stay thin: they sync any live-edited text out
@@ -14,9 +26,19 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		a.saveSession()
 		return gocui.ErrQuit
 	}
-	if err := g.SetKeybinding("", 'q', gocui.ModNone, quit); err != nil {
-		return err
+	// quit is scoped to the non-editable views only (never "url", "content",
+	// or "prompt" while it accepts text) — gocui delivers a "" (global)
+	// keybinding's handler on every keystroke *in addition to* the view's
+	// own text editor, regardless of focus, so a global 'q' would quit the
+	// app the instant anyone typed the letter q into a URL, header, or
+	// script (e.g. a GraphQL "query { ... }").
+	for _, view := range []string{panelSidebar, panelResponse, "help", "codegen"} {
+		if err := bind(g, a, view, "quit", quit); err != nil {
+			return err
+		}
 	}
+	// Ctrl+C always force-quits, regardless of keymap config — a fixed
+	// safety net so a broken keybindings.json can never lock the app open.
 	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
 		return err
 	}
@@ -38,7 +60,7 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		return g.SetCurrentView(next)
 	}
 	for _, name := range []string{panelSidebar, panelURL, panelResponse} {
-		if err := g.SetKeybinding(name, gocui.KeyTab, gocui.ModNone, cycleFocus); err != nil {
+		if err := bind(g, a, name, "cycleFocus", cycleFocus); err != nil {
 			return err
 		}
 	}
@@ -67,15 +89,15 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		}
 	}
 	jumpBindings := []struct {
-		key gocui.Key
-		to  string
+		action string
+		to     string
 	}{
-		{gocui.KeyCtrlS, panelSidebar},
-		{gocui.KeyCtrlU, panelURL},
-		{gocui.KeyCtrlE, panelResponse},
+		{"jumpSidebar", panelSidebar},
+		{"jumpURL", panelURL},
+		{"jumpResponse", panelResponse},
 	}
 	for _, b := range jumpBindings {
-		if err := g.SetKeybinding("", b.key, gocui.ModNone, jumpToPanel(b.to)); err != nil {
+		if err := bind(g, a, "", b.action, jumpToPanel(b.to)); err != nil {
 			return err
 		}
 	}
@@ -88,9 +110,9 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		if sv, err := g.View("status"); err == nil {
 			renderStatus(sv, a)
 		}
-		return g.SetCurrentView("content")
+		return nil
 	}
-	if err := g.SetKeybinding("", gocui.KeyCtrlB, gocui.ModNone, jumpToContent); err != nil {
+	if err := bind(g, a, "", "jumpContent", jumpToContent); err != nil {
 		return err
 	}
 
@@ -233,26 +255,54 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		}
 		return nil
 	}
+	sidebarExport := func(g *gocui.Gui, v *gocui.View) error {
+		if a.store == nil || len(a.sidebar) == 0 {
+			return nil
+		}
+		sel := a.sidebar[a.sidebarSel]
+		if sel.section != "" || len(sel.itemPath) != 0 {
+			return nil
+		}
+		name := a.collections[sel.collIdx].Info.Name
+		a.StartPrompt("exportPath", sel, a.store.BaseDir+"/"+name+".json")
+		return nil
+	}
+	sidebarImport := func(g *gocui.Gui, v *gocui.View) error {
+		if a.store == nil {
+			return nil
+		}
+		a.StartPrompt("importPath", sidebarEntry{}, "")
+		return nil
+	}
 
 	sidebarBindings := []struct {
-		key interface{}
-		h   gocui.KeybindingHandler
+		action string
+		h      gocui.KeybindingHandler
 	}{
-		{gocui.KeyArrowUp, sidebarUp},
-		{'k', sidebarUp},
-		{gocui.KeyArrowDown, sidebarDown},
-		{'j', sidebarDown},
-		{gocui.KeyEnter, sidebarEnter},
-		{'n', sidebarNewCollection},
-		{'a', sidebarNewRequest},
-		{'r', sidebarRename},
-		{'d', sidebarDelete},
-		{'v', sidebarEditVars},
+		{"sidebarUp", sidebarUp},
+		{"sidebarDown", sidebarDown},
+		{"sidebarEnter", sidebarEnter},
+		{"sidebarNewCollection", sidebarNewCollection},
+		{"sidebarNewRequest", sidebarNewRequest},
+		{"sidebarRename", sidebarRename},
+		{"sidebarDelete", sidebarDelete},
+		{"sidebarEditVars", sidebarEditVars},
+		{"sidebarExport", sidebarExport},
+		{"sidebarImport", sidebarImport},
 	}
 	for _, b := range sidebarBindings {
-		if err := g.SetKeybinding(panelSidebar, b.key, gocui.ModNone, b.h); err != nil {
+		if err := bind(g, a, panelSidebar, b.action, b.h); err != nil {
 			return err
 		}
+	}
+	// Vim-style j/k aliases for sidebar navigation always work alongside
+	// whatever the configured up/down keys are — a fixed convenience, not
+	// itself user-configurable.
+	if err := g.SetKeybinding(panelSidebar, 'k', gocui.ModNone, sidebarUp); err != nil {
+		return err
+	}
+	if err := g.SetKeybinding(panelSidebar, 'j', gocui.ModNone, sidebarDown); err != nil {
+		return err
 	}
 
 	// --- url ---
@@ -292,7 +342,7 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		if sv, err := g.View("status"); err == nil {
 			renderStatus(sv, a)
 		}
-		return g.SetCurrentView("content")
+		return nil
 	}
 	urlHome := func(g *gocui.Gui, v *gocui.View) error {
 		_ = v.SetOrigin(0, 0)
@@ -303,44 +353,63 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		setURLText(v, trimTrailingNewline(v.Buffer()))
 		return nil
 	}
+	cycleBodyType := func(delta int) gocui.KeybindingHandler {
+		return func(g *gocui.Gui, v *gocui.View) error {
+			if a.activeTab != tabBody {
+				return nil
+			}
+			a.CycleBodyType(delta)
+			if sv, err := g.View("status"); err == nil {
+				a.statusMsg = fmt.Sprintf("Body type: %s", bodyTypes[a.bodyType])
+				renderStatus(sv, a)
+			}
+			return nil
+		}
+	}
 
+	// Left/Right stay reserved for moving the cursor inside the URL text
+	// (it's an editable field) — not configurable. Ctrl+K/J and Ctrl+P/N
+	// stay as fixed aliases (vim/emacs muscle memory) alongside whatever
+	// the configured urlMethodUp/Down and urlSwitchTabPrev/Next keys are,
+	// same rationale as the sidebar's j/k aliases above.
 	urlBindings := []struct {
-		key interface{}
-		mod gocui.Modifier
-		h   gocui.KeybindingHandler
+		action string
+		h      gocui.KeybindingHandler
 	}{
-		// Left/Right stay reserved for moving the cursor inside the URL
-		// text (it's an editable field) — that was the actual bug: they
-		// used to double as tab-switch. Up/Down keep cycling the method
-		// as before (a single-line field has no vertical text to move
-		// through, so there's nothing to reclaim there). Tab switching
-		// moves to Ctrl+P/N, and Ctrl+K/J duplicate method-cycle, so both
-		// actions also have a non-arrow shortcut: raw single-byte control
-		// codes that every terminal sends identically (same mechanism as
-		// Ctrl+R below) — unlike Alt+Arrow, which relies on a
-		// modifier-encoded escape sequence (e.g. "ESC[1;3C") that this
-		// app's terminal library doesn't parse, so it leaked as literal
-		// text into the URL instead of firing the shortcut.
-		// Ctrl+J/K echo vim's j/k (down/up); Ctrl+N/P echo emacs'
-		// next/previous. H/I/M are avoided: they alias Backspace/Tab/Enter.
-		{gocui.KeyArrowUp, gocui.ModNone, urlUp},
-		{gocui.KeyArrowDown, gocui.ModNone, urlDown},
-		{gocui.KeyCtrlK, gocui.ModNone, urlUp},
-		{gocui.KeyCtrlJ, gocui.ModNone, urlDown},
-		{gocui.KeyCtrlP, gocui.ModNone, switchTab(-1)},
-		{gocui.KeyCtrlN, gocui.ModNone, switchTab(1)},
-		{gocui.KeyHome, gocui.ModNone, urlHome},
-		{gocui.KeyEnd, gocui.ModNone, urlEnd},
-		{gocui.KeyEnter, gocui.ModNone, urlEnter},
-		{gocui.KeyCtrlR, gocui.ModNone, sendRequest},
+		{"urlMethodUp", urlUp},
+		{"urlMethodDown", urlDown},
+		{"urlSwitchTabPrev", switchTab(-1)},
+		{"urlSwitchTabNext", switchTab(1)},
+		{"urlHome", urlHome},
+		{"urlEnd", urlEnd},
+		{"urlEnterContent", urlEnter},
+		{"sendRequest", sendRequest},
+		{"cycleBodyType", cycleBodyType(1)},
 	}
 	for _, b := range urlBindings {
-		if err := g.SetKeybinding(panelURL, b.key, b.mod, b.h); err != nil {
+		if err := bind(g, a, panelURL, b.action, b.h); err != nil {
+			return err
+		}
+	}
+	// Ctrl+K/J are fixed vim-style aliases for method cycling, alongside
+	// whatever urlMethodUp/Down resolve to (arrows by default) — same
+	// rationale as the sidebar's j/k aliases above. Tab-switching has no
+	// such alias: urlSwitchTabPrev/Next (Ctrl+P/N by default) are its only
+	// binding.
+	fixedURLBindings := []struct {
+		key gocui.Key
+		h   gocui.KeybindingHandler
+	}{
+		{gocui.KeyCtrlK, urlUp},
+		{gocui.KeyCtrlJ, urlDown},
+	}
+	for _, b := range fixedURLBindings {
+		if err := g.SetKeybinding(panelURL, b.key, gocui.ModNone, b.h); err != nil {
 			return err
 		}
 	}
 
-	// --- content (headers/body/params/auth editor) ---
+	// --- content (headers/body/params/auth/scripts editor) ---
 	contentEsc := func(g *gocui.Gui, v *gocui.View) error {
 		syncFromViews(g, a)
 		if a.envEditIdx >= 0 {
@@ -359,10 +428,10 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		}
 		return g.SetCurrentView("url")
 	}
-	if err := g.SetKeybinding("content", gocui.KeyEsc, gocui.ModNone, contentEsc); err != nil {
+	if err := bind(g, a, "content", "contentEsc", contentEsc); err != nil {
 		return err
 	}
-	if err := g.SetKeybinding("content", gocui.KeyCtrlR, gocui.ModNone, sendRequest); err != nil {
+	if err := bind(g, a, "content", "sendRequest", sendRequest); err != nil {
 		return err
 	}
 
@@ -378,16 +447,16 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		}
 	}
 	responseBindings := []struct {
-		key interface{}
-		h   gocui.KeybindingHandler
+		action string
+		h      gocui.KeybindingHandler
 	}{
-		{gocui.KeyArrowUp, scrollResponse(-1)},
-		{gocui.KeyArrowDown, scrollResponse(1)},
-		{gocui.KeyPgup, scrollResponse(-10)},
-		{gocui.KeyPgdn, scrollResponse(10)},
+		{"responseScrollUp", scrollResponse(-1)},
+		{"responseScrollDown", scrollResponse(1)},
+		{"responsePageUp", scrollResponse(-10)},
+		{"responsePageDown", scrollResponse(10)},
 	}
 	for _, b := range responseBindings {
-		if err := g.SetKeybinding(panelResponse, b.key, gocui.ModNone, b.h); err != nil {
+		if err := bind(g, a, panelResponse, b.action, b.h); err != nil {
 			return err
 		}
 	}
@@ -405,13 +474,49 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		a.showHelp = !a.showHelp
 		return nil
 	}
-	if err := g.SetKeybinding("", gocui.KeyCtrlSlash, gocui.ModNone, toggleHelp); err != nil {
+	if err := bind(g, a, "", "toggleHelp", toggleHelp); err != nil {
 		return err
 	}
 	if err := g.SetKeybinding("help", gocui.KeyEsc, gocui.ModNone, toggleHelp); err != nil {
 		return err
 	}
 	if err := g.SetKeybinding("help", gocui.KeyCtrlSlash, gocui.ModNone, toggleHelp); err != nil {
+		return err
+	}
+
+	// --- code generation overlay ---
+	toggleCodegen := func(g *gocui.Gui, v *gocui.View) error {
+		if a.promptMode != "" || a.showHelp {
+			return nil
+		}
+		syncFromViews(g, a)
+		a.ToggleCodegen()
+		return nil
+	}
+	if err := bind(g, a, "", "toggleCodegen", toggleCodegen); err != nil {
+		return err
+	}
+	codegenNextLang := func(g *gocui.Gui, v *gocui.View) error {
+		a.NextCodegenLang()
+		return nil
+	}
+	codegenPrevLang := func(g *gocui.Gui, v *gocui.View) error {
+		a.PrevCodegenLang()
+		return nil
+	}
+	if err := g.SetKeybinding("codegen", gocui.KeyTab, gocui.ModNone, codegenNextLang); err != nil {
+		return err
+	}
+	if err := g.SetKeybinding("codegen", gocui.KeyBackspace2, gocui.ModNone, codegenPrevLang); err != nil {
+		return err
+	}
+
+	// --- theme toggle ---
+	toggleTheme := func(g *gocui.Gui, v *gocui.View) error {
+		a.ToggleTheme()
+		return nil
+	}
+	if err := bind(g, a, "", "toggleTheme", toggleTheme); err != nil {
 		return err
 	}
 

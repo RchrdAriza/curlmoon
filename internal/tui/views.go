@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/jesseduffield/gocui"
 )
 
@@ -16,6 +18,8 @@ func contentText(a *App, tab int) string {
 		return a.authText
 	case tabParams:
 		return a.paramsText
+	case tabScripts:
+		return a.scriptsText
 	}
 	return ""
 }
@@ -74,10 +78,25 @@ func syncFromViews(g *gocui.Gui, a *App) {
 		a.authText = text
 	case tabParams:
 		a.paramsText = text
+	case tabScripts:
+		a.scriptsText = text
 	}
 }
 
+// trimTrailingNewline strips gocui.View.Buffer()'s always-present trailing
+// newline, and the trailing space every line picks up as a side effect of
+// how gocui's default editor inserts characters (View.writeRune leaves a
+// dangling null cell after the last character typed on any line, which
+// Buffer() renders as a literal space — see gocui's edit.go). Without this,
+// every line ever typed into (URL, headers, body, ...) would silently gain
+// a trailing space, which is invisible in the UI but breaks exact-match
+// sends (URLs, JSON bodies, GraphQL queries).
 func trimTrailingNewline(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " ")
+	}
+	s = strings.Join(lines, "\n")
 	for len(s) > 0 && (s[len(s)-1] == '\n' || s[len(s)-1] == '\r') {
 		s = s[:len(s)-1]
 	}
@@ -187,6 +206,8 @@ func layout(g *gocui.Gui, a *App) error {
 	if v, err := g.View("content"); err == nil {
 		if a.envEditIdx >= 0 {
 			v.Title = "Env: " + a.environments[a.envEditIdx].Name
+		} else if a.activeTab == tabBody {
+			v.Title = "Body (" + bodyTypes[a.bodyType] + ")"
 		} else {
 			v.Title = tabNames[a.activeTab]
 		}
@@ -196,6 +217,13 @@ func layout(g *gocui.Gui, a *App) error {
 	if a.envEditPending {
 		a.envEditPending = false
 		loadEnvEditor(g, a)
+		if err := g.SetCurrentView("content"); err != nil {
+			return err
+		}
+	}
+
+	if a.contentFocusPending {
+		a.contentFocusPending = false
 		if err := g.SetCurrentView("content"); err != nil {
 			return err
 		}
@@ -253,7 +281,7 @@ func layout(g *gocui.Gui, a *App) error {
 		// rendering, which runs after layout() returns — so setting it
 		// here (with no restore) is what actually colors the prompt's
 		// border, unlike drawBorder's color param used elsewhere.
-		g.FgColor = colorPrimary
+		g.FgColor = currentTheme.Primary
 	} else {
 		if _, err := g.View("prompt"); err == nil {
 			_ = g.DeleteView("prompt")
@@ -261,8 +289,41 @@ func layout(g *gocui.Gui, a *App) error {
 		}
 	}
 
+	if a.showCodegen {
+		w, h := maxX-8, maxY-6
+		if w < 20 {
+			w = maxX
+		}
+		if h < 10 {
+			h = maxY
+		}
+		x0, y0 := (maxX-w)/2, (maxY-h)/2
+		v, err := g.SetView("codegen", x0, y0, x0+w, y0+h)
+		if err != nil {
+			if err != gocui.ErrUnknownView {
+				return err
+			}
+			v.Frame = true
+			v.Editable = false
+			if err := g.SetCurrentView("codegen"); err != nil {
+				return err
+			}
+		}
+		renderCodegen(v, a)
+		g.FgColor = currentTheme.Primary
+	} else {
+		if _, err := g.View("codegen"); err == nil {
+			_ = g.DeleteView("codegen")
+			restoreView := a.activePanel
+			if a.subFocus {
+				restoreView = "content"
+			}
+			_ = g.SetCurrentView(restoreView)
+		}
+	}
+
 	if a.showHelp {
-		text, contentW, contentH := helpText()
+		text, contentW, contentH := helpText(a.keymap)
 		w, h := contentW+4, contentH+2
 		if w > maxX-4 {
 			w = maxX - 4
@@ -279,13 +340,13 @@ func layout(g *gocui.Gui, a *App) error {
 			// its own Frame/title draw call happens after (on top of)
 			// everything laid out earlier this frame.
 			v.Frame = true
-			v.Title = "Keybindings (Esc or Ctrl+/ to close)"
+			v.Title = "Keybindings (Esc or " + a.keymap.DisplayKey("toggleHelp") + " to close)"
 			setViewText(v, text)
 			if err := g.SetCurrentView("help"); err != nil {
 				return err
 			}
 		}
-		g.FgColor = colorPrimary
+		g.FgColor = currentTheme.Primary
 	} else {
 		if _, err := g.View("help"); err == nil {
 			_ = g.DeleteView("help")

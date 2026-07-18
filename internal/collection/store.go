@@ -199,6 +199,23 @@ func (s *Store) Import(path string) (*Collection, error) {
 	return &c, nil
 }
 
+// Export writes the named collection's current on-disk state to destPath,
+// re-using the same Postman v2.1-compatible JSON encoding Save uses.
+func (s *Store) Export(name, destPath string) error {
+	c, err := s.Load(name)
+	if err != nil {
+		return err
+	}
+	if c.Info.Schema == "" {
+		c.Info.Schema = schemaURL
+	}
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(destPath, data, 0o644)
+}
+
 // Rename changes a collection's display name and its backing file.
 func (s *Store) Rename(oldName, newName string) error {
 	if strings.TrimSpace(newName) == "" {

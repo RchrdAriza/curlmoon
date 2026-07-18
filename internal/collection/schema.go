@@ -1,6 +1,9 @@
 package collection
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // Schema is a simplified Postman Collection v2.1-compatible model:
 // https://schema.getpostman.com/json/collection/v2.1.0/collection.json
@@ -21,6 +24,31 @@ type Item struct {
 	Name    string   `json:"name"`
 	Item    []Item   `json:"item,omitempty"`
 	Request *Request `json:"request,omitempty"`
+	Event   []Event  `json:"event,omitempty"`
+}
+
+// Event is a pre-request or test script attached to a request, matching
+// Postman v2.1's event[] block.
+type Event struct {
+	Listen string `json:"listen"` // "prerequest" | "test"
+	Script Script `json:"script"`
+}
+
+type Script struct {
+	Exec []string `json:"exec"`
+}
+
+// ExecText joins a Script's exec lines back into a single script string.
+func (s Script) ExecText() string {
+	return strings.Join(s.Exec, "\n")
+}
+
+// NewScript splits text into the line-array format Postman v2.1 expects.
+func NewScript(text string) Script {
+	if text == "" {
+		return Script{}
+	}
+	return Script{Exec: strings.Split(text, "\n")}
 }
 
 // IsFolder reports whether the item is a container rather than a request leaf.
@@ -44,6 +72,14 @@ type Body struct {
 	Mode    string       `json:"mode"`
 	Raw     string       `json:"raw,omitempty"`
 	Options *BodyOptions `json:"options,omitempty"`
+	GraphQL *GraphQLBody `json:"graphql,omitempty"`
+}
+
+// GraphQLBody holds a GraphQL query and its JSON-encoded variables, matching
+// Postman v2.1's body.graphql block.
+type GraphQLBody struct {
+	Query     string `json:"query"`
+	Variables string `json:"variables,omitempty"`
 }
 
 type BodyOptions struct {

@@ -61,6 +61,10 @@ terminal sends identically, so it doesn't depend on either input mode.
 - `r` — rename the selected collection/request/environment
 - `d` — delete the selected item (confirm with `y`/`n`)
 - `v` — edit an environment's variables (only on an Environment entry)
+- `x` — export the selected collection to a file path you enter (Postman
+  v2.1 JSON, including any GraphQL body and pre-request/test scripts)
+- `i` — import a collection from a file path you enter (same as `-c` at
+  startup, but without restarting)
 
 The sidebar has three sections:
 
@@ -77,16 +81,22 @@ The sidebar has three sections:
 - `↑↓`, or `Ctrl+K`/`Ctrl+J` — cycle the HTTP method (GET, POST, PUT, PATCH,
   DELETE, HEAD, OPTIONS)
 - `←→`, `Home`, `End` — move the cursor while typing the URL
-- `Ctrl+P`/`Ctrl+N` — switch tab (Headers → Body → Auth → Params → back)
+- `Ctrl+P`/`Ctrl+N` — switch tab (Headers → Body → Auth → Params → Scripts →
+  back)
+- `Ctrl+Y` — cycle the body type (`none` → `JSON` → `raw` → `form-data` →
+  `x-www-urlencoded` → `GraphQL` → back), only while the Body tab is active
+  — the content editor's title shows the current one, e.g. `Body (JSON)`
 - `Enter` — jump into the content editor for the active tab
 - `Ctrl+R` — send the request (also works from the content editor)
+- `Ctrl+G` — open the code generation overlay for the current request
+- `Ctrl+T` — toggle light/dark theme
 
-## Content editor (Headers / Body / Auth / Params)
+## Content editor (Headers / Body / Auth / Params / Scripts)
 
 Headers, Params, and Auth all share one format: one `Key: Value` pair per
 line. Body is free-form text, interpreted according to the body type
 selected for the request (`none`, `JSON`, `raw`, `form-data`,
-`x-www-urlencoded`).
+`x-www-urlencoded`, `GraphQL`).
 
 - `Esc` — save the buffer and return to the URL bar
 - `Ctrl+R` — send the request without leaving the editor
@@ -128,6 +138,62 @@ Each `Key: Value` line becomes a URL query parameter, appended (or merged)
 onto whatever's in the URL bar when the request is built — you don't need
 to hand-edit the query string.
 
+### GraphQL body
+
+Select `GraphQL` as the body type (cycle body types the same way you cycle
+anything else on that tab) and write the query, optionally followed by a
+`### variables` line and a JSON object:
+
+```
+query GetUser($id: ID!) {
+  user(id: $id) { id name }
+}
+
+### variables
+{ "id": 1 }
+```
+
+curlmoon wraps this into the `{"query": ..., "variables": ...}` POST body a
+GraphQL endpoint expects, and sends `Content-Type: application/json`
+automatically.
+
+### Scripts tab
+
+Two sections, delimited the same way as GraphQL variables:
+
+```
+### pre-request
+pm.environment.set("token", "abc123");
+
+### test
+pm.test("status is 200", () => pm.response.code === 200);
+pm.test("has id", () => pm.response.json().id !== undefined);
+```
+
+The pre-request script runs before the request is built (its
+`pm.environment.set` calls affect `{{variable}}` resolution for *this send
+only* — they aren't written back to the environment file). The test script
+runs after the response comes back. Available API:
+
+| Call | Effect |
+|---|---|
+| `pm.environment.get(key)` / `.set(key, value)` | Read/write the active environment's variables (this send only) |
+| `pm.variables.get(key)` / `.set(key, value)` | Scratch variables, local to this run |
+| `pm.request.headers.get(key)` | Read a header from the request about to be sent (test script only) |
+| `pm.response.code`, `.status`, `.headers.get(key)`, `.text()`, `.json()` | Inspect the response (test script only) |
+| `pm.test(name, fn)` | Record a pass/fail: `fn` throwing, or returning `false`, marks it failed |
+
+Results show up under the response body as `✓ N passed` / `✗ N failed`,
+with failure details listed underneath. A malformed script shows as
+"Script error: ..." instead.
+
+## Generate code
+
+`Ctrl+G` opens an overlay with the current request (method, URL, headers,
+body — variables resolved, scripts *not* run) rendered as a ready-to-run
+snippet. `Tab`/`Backspace` cycle through curl, Go, Python, and JavaScript;
+`Ctrl+G` again closes it.
+
 ## Variables
 
 Any `{{name}}` token in the URL, headers, or body is resolved against the
@@ -154,7 +220,36 @@ Creating, renaming, or deleting things opens a small centered prompt:
 
 ## Quitting
 
-`q` or `Ctrl+C` saves the current session and exits.
+`q` or `Ctrl+C` saves the current session and exits. `Ctrl+C` always works,
+even if `keybindings.json` reassigns `quit` to something else.
+
+## Configurable keybindings
+
+Every binding listed above (except `Ctrl+C`, and the vim-style `j`/`k` and
+`Ctrl+K`/`Ctrl+J` aliases) can be reassigned by creating
+`~/.curlmoon/keybindings.json`:
+
+```json
+{
+  "sendRequest": { "key": "ctrl+x" },
+  "quit": { "key": "ctrl+q" }
+}
+```
+
+Only the actions you list are overridden — anything missing keeps its
+default. Key strings look like `"q"`, `"ctrl+r"`, `"up"`, `"esc"`,
+`"pgdn"`, `"ctrl+/"`. Changes take effect on the next launch, and the
+`Ctrl+/` help overlay always reflects whatever is actually bound. An
+invalid key string or a broken JSON file falls back silently to the
+default for that action.
+
+## Theme
+
+`Ctrl+T` toggles between the dark (default) and light color themes and
+remembers the choice in `~/.curlmoon/config.json`. gocui only has the
+terminal's basic 16-color palette to work with, so "light" mostly means
+swapping the muted/foreground color for better contrast on a light
+background — it's not a full re-skin.
 
 ## Storage
 
@@ -166,6 +261,8 @@ Everything lives under `~/.curlmoon/`:
 | `environments/*.json` | Environments and their variables |
 | `history.json` | The last 50 sent requests |
 | `session.json` | The editor state (method, URL, tabs, active request) restored on next launch |
+| `keybindings.json` | Optional keybinding overrides — see [Configurable keybindings](#configurable-keybindings) |
+| `config.json` | The active theme (`Ctrl+T`) |
 
 curlmoon starts with nothing seeded by default. Pass `--demo` to try it with
 a couple of example collections for that run only (not persisted), or

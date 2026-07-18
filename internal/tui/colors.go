@@ -6,16 +6,58 @@ import (
 	"github.com/jesseduffield/gocui"
 )
 
-// Color roles, mapped onto gocui's basic 16-color palette (the only palette
-// its ANSI interpreter supports — see escape.go).
-const (
-	colorPrimary   = gocui.ColorCyan
-	colorSecondary = gocui.ColorYellow
-	colorSuccess   = gocui.ColorGreen
-	colorError     = gocui.ColorRed
-	colorMuted     = gocui.ColorWhite
-	colorMagenta   = gocui.ColorMagenta
-)
+// Theme holds the semantic color roles curlmoon paints with. gocui only
+// supports termbox's basic 16-color palette (see ansiFG below), so "light"
+// vs "dark" just means picking a different assignment from that same
+// 16-color set — there's no true RGB theming available here.
+type Theme struct {
+	Primary   gocui.Attribute
+	Secondary gocui.Attribute
+	Success   gocui.Attribute
+	Error     gocui.Attribute
+	Muted     gocui.Attribute
+	Magenta   gocui.Attribute
+}
+
+var darkTheme = Theme{
+	Primary:   gocui.ColorCyan,
+	Secondary: gocui.ColorYellow,
+	Success:   gocui.ColorGreen,
+	Error:     gocui.ColorRed,
+	Muted:     gocui.ColorWhite,
+	Magenta:   gocui.ColorMagenta,
+}
+
+// lightTheme swaps the "muted" role from white to black, since white text
+// on a light terminal background is nearly invisible; the rest of the
+// 16-color palette reads fine on either background.
+var lightTheme = Theme{
+	Primary:   gocui.ColorBlue,
+	Secondary: gocui.ColorYellow,
+	Success:   gocui.ColorGreen,
+	Error:     gocui.ColorRed,
+	Muted:     gocui.ColorBlack,
+	Magenta:   gocui.ColorMagenta,
+}
+
+// currentTheme is the active color set, swapped by App.ToggleTheme.
+var currentTheme = darkTheme
+
+// themeByName resolves a persisted theme name ("dark"/"light") to a Theme,
+// defaulting to dark for anything else (including the empty string).
+func themeByName(name string) Theme {
+	if name == "light" {
+		return lightTheme
+	}
+	return darkTheme
+}
+
+func themeName(t Theme) string {
+	if t == lightTheme {
+		return "light"
+	}
+	return "dark"
+}
 
 // ansiFG maps a gocui.Attribute color to its SGR foreground code.
 func ansiFG(c gocui.Attribute) int {
@@ -54,17 +96,17 @@ func ansiWrap(text string, fg gocui.Attribute, bold bool) string {
 func methodColor(method string) gocui.Attribute {
 	switch method {
 	case "GET":
-		return colorSuccess
+		return currentTheme.Success
 	case "POST":
-		return colorPrimary
+		return currentTheme.Primary
 	case "PUT":
-		return colorSecondary
+		return currentTheme.Secondary
 	case "DELETE":
-		return colorError
+		return currentTheme.Error
 	case "PATCH":
-		return colorMagenta
+		return currentTheme.Magenta
 	default:
-		return colorSuccess
+		return currentTheme.Success
 	}
 }
 
@@ -72,10 +114,10 @@ func methodColor(method string) gocui.Attribute {
 func statusColor(statusCode int) gocui.Attribute {
 	switch {
 	case statusCode >= 200 && statusCode < 300:
-		return colorSuccess
+		return currentTheme.Success
 	case statusCode >= 400:
-		return colorError
+		return currentTheme.Error
 	default:
-		return colorSecondary
+		return currentTheme.Secondary
 	}
 }

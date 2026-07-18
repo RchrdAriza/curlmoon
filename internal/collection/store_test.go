@@ -1,6 +1,7 @@
 package collection
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -190,5 +191,44 @@ func TestStore_RenameSameSlugSucceeds(t *testing.T) {
 
 	if err := s.Rename("Name", "  Name  "); err != nil {
 		t.Fatalf("expected rename with same slug to succeed, got %v", err)
+	}
+}
+
+func TestStore_Export(t *testing.T) {
+	s := NewStore(t.TempDir())
+	c, err := s.Create("Exportable")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	c.AddItemAt(nil, NewRequestItem("Ping", "GET", "https://example.com/ping", nil, "", ""))
+	if err := s.Save(c); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "out.json")
+	if err := s.Export("Exportable", dest); err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	var roundtrip Collection
+	if err := json.Unmarshal(data, &roundtrip); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	if roundtrip.Info.Name != "Exportable" {
+		t.Errorf("expected name preserved, got %s", roundtrip.Info.Name)
+	}
+	if len(roundtrip.Item) != 1 || roundtrip.Item[0].Request.URL.Raw != "https://example.com/ping" {
+		t.Errorf("expected item to round-trip, got %v", roundtrip.Item)
+	}
+}
+
+func TestStore_ExportMissingCollectionFails(t *testing.T) {
+	s := NewStore(t.TempDir())
+	if err := s.Export("Nope", filepath.Join(t.TempDir(), "out.json")); err == nil {
+		t.Error("expected export of missing collection to fail")
 	}
 }

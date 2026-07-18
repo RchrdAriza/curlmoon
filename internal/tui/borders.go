@@ -7,9 +7,9 @@ import "github.com/jesseduffield/gocui"
 // keystrokes go to.
 func borderColor(focused bool) gocui.Attribute {
 	if focused {
-		return colorPrimary
+		return currentTheme.Primary
 	}
-	return colorMuted
+	return currentTheme.Muted
 }
 
 // drawBorder draws a view's frame, corners and title manually. gocui's own

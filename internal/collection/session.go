@@ -16,6 +16,7 @@ type Session struct {
 	BodyType  string   `json:"body_type,omitempty"`
 	Body      string   `json:"body,omitempty"`
 	AuthText  string   `json:"auth_text,omitempty"`
+	Scripts   string   `json:"scripts,omitempty"`
 	ActiveTab int      `json:"active_tab"`
 }
 

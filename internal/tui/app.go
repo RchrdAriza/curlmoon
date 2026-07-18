@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"curlmoon/internal/codegen"
 	"curlmoon/internal/collection"
+	"curlmoon/internal/config"
 	"curlmoon/internal/environment"
 	"curlmoon/internal/history"
 	"curlmoon/internal/httpclient"
+	"curlmoon/internal/script"
 	"fmt"
 	"net/url"
 	"strings"
@@ -16,6 +19,7 @@ const (
 	tabBody    = 1
 	tabAuth    = 2
 	tabParams  = 3
+	tabScripts = 4
 )
 
 const (
@@ -25,8 +29,10 @@ const (
 )
 
 var methods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
-var bodyTypes = []string{"none", "JSON", "raw", "form-data", "x-www-urlencoded"}
-var tabNames = []string{"Headers", "Body", "Auth", "Params"}
+var bodyTypes = []string{"none", "JSON", "raw", "form-data", "x-www-urlencoded", "GraphQL"}
+var tabNames = []string{"Headers", "Body", "Auth", "Params", "Scripts"}
+
+const bodyTypeGraphQL = 5
 
 type sidebarEntry struct {
 	name     string
@@ -48,6 +54,17 @@ type App struct {
 	activePanel string // panelSidebar | panelURL | panelResponse
 	subFocus    bool   // true when focus is inside the "content" view for activeTab
 
+	// contentFocusPending is true right after EnterContentEditor, until
+	// layout() has moved gocui's focus into "content" on the *next* frame.
+	// It must not happen synchronously in the same keystroke handler: the
+	// Enter keypress that triggers entry is still being dispatched, and
+	// gocui delivers it to both the keybinding *and* whatever view ends up
+	// current by the time the handler returns (see appEditor.Edit) — if
+	// SetCurrentView("content") ran inline here, that same Enter would
+	// leak into content's own editor right after and insert a stray blank
+	// line at the top of whatever the active tab holds.
+	contentFocusPending bool
+
 	sidebar    []sidebarEntry
 	sidebarSel int
 	sidebarOff int
@@ -62,20 +79,26 @@ type App struct {
 	paramsText  string
 	bodyText    string
 	authText    string
+	scriptsText string
 
 	sending bool
 
-	response *httpclient.Response
-	respErr  error
-	showResp bool
+	response    *httpclient.Response
+	respErr     error
+	showResp    bool
+	testResults []script.TestResult
+	scriptErr   string
+
+	showCodegen bool
+	codegenLang int
 
 	statusMsg string
 
 	store       *collection.Store
 	collections []*collection.Collection
 
-	envStore      *environment.Store
-	environments  []*environment.Environment
+	envStore       *environment.Store
+	environments   []*environment.Environment
 	activeEnvName  string
 	envEditIdx     int    // index into environments currently open in the content editor; -1 when not editing
 	envEditText    string // live buffer for the environment being edited
@@ -84,11 +107,13 @@ type App struct {
 	historyStore   *history.Store
 	historyEntries []history.Entry
 
-	promptMode   string // "", "newCollection", "newRequest", "rename", "confirmDelete", "newEnvironment", "renameEnv", "confirmDeleteEnv"
+	promptMode   string // "", "newCollection", "newRequest", "rename", "confirmDelete", "newEnvironment", "renameEnv", "confirmDeleteEnv", "exportPath", "importPath"
 	promptTarget sidebarEntry
 	promptText   string
 
 	showHelp bool // true while the keybinding help overlay (Ctrl+/) is open
+
+	keymap config.Keymap // action name -> key, see internal/config
 }
 
 // NewApp builds a standalone app with the built-in example sidebar and no
@@ -112,9 +137,11 @@ func NewApp() *App {
 		activePanel: panelURL,
 		activeTab:   tabHeaders,
 		authText:    defaultAuthText,
+		scriptsText: defaultScriptsText,
 		envEditIdx:  -1,
 		collapsed:   make(map[string]bool),
 		statusMsg:   "Ready — Tab switches panels, Enter to edit fields",
+		keymap:      config.DefaultKeymap(),
 	}
 }
 
@@ -126,6 +153,8 @@ func NewApp() *App {
 func NewAppWithStore(store *collection.Store, extra ...*collection.Collection) *App {
 	a := NewApp()
 	a.store = store
+	currentTheme = themeByName(config.LoadTheme(store.BaseDir))
+	a.keymap = config.LoadKeymap(store.BaseDir)
 
 	cols, _ := store.LoadAll()
 	a.collections = append(cols, extra...)
@@ -259,6 +288,9 @@ func (a *App) restoreSession() {
 	if sess.AuthText != "" {
 		a.authText = sess.AuthText
 	}
+	if sess.Scripts != "" {
+		a.scriptsText = sess.Scripts
+	}
 }
 
 func (a *App) saveSession() {
@@ -271,6 +303,7 @@ func (a *App) saveSession() {
 		BodyType:  bodyTypes[a.bodyType],
 		Body:      a.bodyText,
 		AuthText:  a.authText,
+		Scripts:   a.scriptsText,
 		ActiveTab: a.activeTab,
 	}
 	for _, p := range parseKV(a.headersText) {
@@ -314,15 +347,16 @@ func (a *App) buildURL() string {
 
 func (a *App) buildHeaders() map[string]string {
 	h := kvToMap(parseKV(a.headersText))
-	if a.bodyType == 1 {
+	switch a.bodyType {
+	case 1, bodyTypeGraphQL:
 		if _, ok := h["Content-Type"]; !ok {
 			h["Content-Type"] = "application/json"
 		}
-	} else if a.bodyType == 2 {
+	case 2:
 		if _, ok := h["Content-Type"]; !ok {
 			h["Content-Type"] = "text/plain"
 		}
-	} else if a.bodyType == 4 {
+	case 4:
 		if _, ok := h["Content-Type"]; !ok {
 			h["Content-Type"] = "application/x-www-form-urlencoded"
 		}
@@ -331,47 +365,91 @@ func (a *App) buildHeaders() map[string]string {
 	return h
 }
 
+// buildBody assembles the outgoing request body, silently dropping malformed
+// GraphQL variables JSON (buildBodyErr surfaces that error to callers that
+// care, i.e. doRequest).
 func (a *App) buildBody() string {
+	body, _ := a.buildBodyErr()
+	return body
+}
+
+func (a *App) buildBodyErr() (string, error) {
 	switch a.bodyType {
 	case 1, 2:
-		return a.bodyText
+		return a.bodyText, nil
+	case bodyTypeGraphQL:
+		return buildGraphQLBody(a.bodyText)
 	}
-	return ""
+	return "", nil
 }
 
 // activeEnvVars returns the resolved variable map for the currently active
-// environment, or an empty map if none is active.
+// environment, or an empty (never nil) map if none is active.
 func (a *App) activeEnvVars() map[string]string {
 	for _, env := range a.environments {
 		if env.Name == a.activeEnvName {
 			return env.Vars()
 		}
 	}
-	return nil
+	return make(map[string]string)
 }
 
-// doRequest executes the current request synchronously, resolving any
-// {{variable}} tokens against the active environment first. Callers that
-// need to stay responsive (the real gocui app) should run this in a
-// goroutine and feed the result back via HandleResponse through
-// *gocui.Gui.Execute.
-func (a *App) doRequest() (*httpclient.Response, error) {
-	vars := a.activeEnvVars()
+// buildRequest resolves the currently edited request against vars, without
+// running any scripts. Used both by doRequest and by the code-gen overlay,
+// which wants to preview the exact request that would be sent.
+func (a *App) buildRequest(vars map[string]string) (*httpclient.Request, error) {
 	headers := a.buildHeaders()
 	for k, v := range headers {
 		headers[k] = environment.Resolve(v, vars)
 	}
-	req := &httpclient.Request{
+	body, err := a.buildBodyErr()
+	if err != nil {
+		return nil, err
+	}
+	return &httpclient.Request{
 		Method:   methods[a.methodIndex],
 		URL:      environment.Resolve(a.buildURL(), vars),
 		Headers:  headers,
-		Body:     environment.Resolve(a.buildBody(), vars),
+		Body:     environment.Resolve(body, vars),
 		BodyType: bodyTypes[a.bodyType],
+	}, nil
+}
+
+// doRequest executes the current request synchronously, resolving any
+// {{variable}} tokens against the active environment first and running the
+// Scripts tab's pre-request/test scripts around the send. Callers that need
+// to stay responsive (the real gocui app) should run this in a goroutine
+// and feed the result back via HandleResponse through *gocui.Gui.Execute —
+// doRequest sets a.scriptErr/a.testResults itself (safe because it always
+// finishes, including those writes, before the caller hands off to
+// gocui.Execute, which synchronizes via a channel send).
+func (a *App) doRequest() (*httpclient.Response, error) {
+	vars := a.activeEnvVars()
+	preReqScript, testScript := parseScripts(a.scriptsText)
+	preRes := script.RunPreRequest(preReqScript, vars)
+	a.scriptErr = preRes.PreRequestErr
+	a.testResults = nil
+
+	req, err := a.buildRequest(vars)
+	if err != nil {
+		return nil, err
 	}
 	if req.URL == "" {
 		return nil, fmt.Errorf("URL is empty")
 	}
-	return httpclient.Execute(req)
+
+	resp, err := httpclient.Execute(req)
+	if err != nil {
+		return resp, err
+	}
+	if testScript != "" {
+		testRes := script.RunTest(testScript, vars, req, resp)
+		a.testResults = testRes.Tests
+		if testRes.TestErr != "" {
+			a.scriptErr = testRes.TestErr
+		}
+	}
+	return resp, err
 }
 
 // StartSending marks a request as in flight so the UI can show a spinner.
@@ -438,6 +516,53 @@ func (a *App) PrevTab() {
 	}
 }
 
+// CycleBodyType moves the selected body type (none/JSON/raw/form-data/
+// x-www-urlencoded/GraphQL) by delta, wrapping around. Only meaningful
+// while the Body tab is active.
+func (a *App) CycleBodyType(delta int) {
+	a.bodyType = ((a.bodyType+delta)%len(bodyTypes) + len(bodyTypes)) % len(bodyTypes)
+}
+
+// ToggleCodegen opens/closes the "generate code" overlay (Ctrl+G).
+func (a *App) ToggleCodegen() {
+	a.showCodegen = !a.showCodegen
+}
+
+// NextCodegenLang / PrevCodegenLang cycle the language shown in the code-gen
+// overlay.
+func (a *App) NextCodegenLang() {
+	a.codegenLang = (a.codegenLang + 1) % len(codegen.Langs)
+}
+
+func (a *App) PrevCodegenLang() {
+	a.codegenLang = (a.codegenLang - 1 + len(codegen.Langs)) % len(codegen.Langs)
+}
+
+// codegenSnippet renders the current request in the code-gen overlay's
+// active language, resolved against the active environment (but without
+// running any scripts — this is a preview, not a send).
+func (a *App) codegenSnippet() string {
+	req, err := a.buildRequest(a.activeEnvVars())
+	if err != nil {
+		return fmt.Sprintf("Error building request: %v", err)
+	}
+	return codegen.Generate(codegen.Langs[a.codegenLang], req)
+}
+
+// ToggleTheme swaps the active color theme between dark and light and
+// persists the choice so it survives restarts.
+func (a *App) ToggleTheme() {
+	if themeName(currentTheme) == "light" {
+		currentTheme = darkTheme
+	} else {
+		currentTheme = lightTheme
+	}
+	if a.store != nil {
+		_ = config.SaveTheme(a.store.BaseDir, themeName(currentTheme))
+	}
+	a.statusMsg = fmt.Sprintf("Theme: %s", themeName(currentTheme))
+}
+
 // MoveSidebarSel moves the sidebar selection by delta, adjusting the scroll
 // offset so the selection stays within [0, maxVisible) rows on screen.
 func (a *App) MoveSidebarSel(delta int, maxVisible int) {
@@ -499,9 +624,11 @@ func (a *App) SelectSidebarEntry() bool {
 }
 
 // EnterContentEditor moves focus into the tab content view (headers/body/
-// auth/params).
+// auth/params/scripts). The gocui focus switch itself happens on the next
+// layout() tick (see contentFocusPending) rather than inline in the caller.
 func (a *App) EnterContentEditor() bool {
 	a.subFocus = true
+	a.contentFocusPending = true
 	a.statusMsg = "Esc to exit editor"
 	return true
 }
@@ -624,11 +751,54 @@ func (a *App) ConfirmPrompt() {
 		if name != "" && target.collIdx < len(a.collections) {
 			c := a.collections[target.collIdx]
 			item := collection.NewRequestItem(name, methods[a.methodIndex], a.buildURL(), a.buildHeaders(), a.buildBody(), bodyTypes[a.bodyType])
+			if a.bodyType == bodyTypeGraphQL {
+				query, vars := parseGraphQLBody(a.bodyText)
+				item.Request.Body = &collection.Body{Mode: "graphql", GraphQL: &collection.GraphQLBody{Query: query, Variables: vars}}
+			}
+			preReq, test := parseScripts(a.scriptsText)
+			if preReq != "" {
+				item.Event = append(item.Event, collection.Event{Listen: "prerequest", Script: collection.NewScript(preReq)})
+			}
+			if test != "" {
+				item.Event = append(item.Event, collection.Event{Listen: "test", Script: collection.NewScript(test)})
+			}
 			c.AddItemAt(nil, item)
 			if err := a.store.Save(c); err != nil {
 				a.statusMsg = fmt.Sprintf("Error: %v", err)
 			} else {
 				a.statusMsg = fmt.Sprintf("Saved request %q to %q", name, c.Info.Name)
+			}
+		}
+
+	case "exportPath":
+		path := strings.TrimSpace(a.promptText)
+		if path != "" && target.collIdx < len(a.collections) {
+			name := a.collections[target.collIdx].Info.Name
+			if err := a.store.Export(name, path); err != nil {
+				a.statusMsg = fmt.Sprintf("Error: %v", err)
+			} else {
+				a.statusMsg = fmt.Sprintf("Exported %q to %s", name, path)
+			}
+		}
+
+	case "importPath":
+		path := strings.TrimSpace(a.promptText)
+		if path != "" {
+			if c, err := a.store.Import(path); err != nil {
+				a.statusMsg = fmt.Sprintf("Error: %v", err)
+			} else {
+				replaced := false
+				for i, existing := range a.collections {
+					if existing.Info.Name == c.Info.Name {
+						a.collections[i] = c
+						replaced = true
+						break
+					}
+				}
+				if !replaced {
+					a.collections = append(a.collections, c)
+				}
+				a.statusMsg = fmt.Sprintf("Imported %q from %s", c.Info.Name, path)
 			}
 		}
 

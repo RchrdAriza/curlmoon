@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"curlmoon/internal/config"
 	"github.com/jesseduffield/gocui"
 )
 
@@ -77,7 +78,7 @@ func renderSidebar(v *gocui.View, a *App) {
 				icon = "[+]"
 			}
 			line := marker + prefix + icon + " " + item.name
-			b.WriteString(ansiWrap(line, colorPrimary, true))
+			b.WriteString(ansiWrap(line, currentTheme.Primary, true))
 		} else {
 			meth := ansiWrap(fmt.Sprintf("%-6s", item.method), methodColor(item.method), true)
 			display := item.name
@@ -99,9 +100,9 @@ func renderTabs(v *gocui.View, a *App) {
 	var parts []string
 	for i, name := range tabNames {
 		if i == a.activeTab {
-			parts = append(parts, ansiWrap(" "+name+" ", colorPrimary, true))
+			parts = append(parts, ansiWrap(" "+name+" ", currentTheme.Primary, true))
 		} else {
-			parts = append(parts, ansiWrap(" "+name+" ", colorMuted, false))
+			parts = append(parts, ansiWrap(" "+name+" ", currentTheme.Muted, false))
 		}
 	}
 	setViewText(v, strings.Join(parts, " "))
@@ -111,6 +112,9 @@ func renderTabs(v *gocui.View, a *App) {
 // focus right now, so users never have to guess (e.g. that ↑/↓ cycle the
 // HTTP method while the URL panel is focused).
 func footerHints(a *App) string {
+	if a.showCodegen {
+		return "Tab/Shift+Tab language  ·  Ctrl+G close"
+	}
 	if a.showHelp {
 		return "Esc or Ctrl+/ close help"
 	}
@@ -122,9 +126,13 @@ func footerHints(a *App) string {
 	}
 	switch a.activePanel {
 	case panelSidebar:
-		return "↑↓/jk navigate  ·  Enter open/toggle  ·  n new  ·  a add request  ·  r rename  ·  d delete  ·  v edit vars  ·  Tab next panel  ·  Ctrl+/ help  ·  q quit"
+		return "↑↓/jk navigate  ·  Enter open/toggle  ·  n new  ·  a add request  ·  r rename  ·  d delete  ·  v edit vars  ·  x export  ·  i import  ·  Tab next panel  ·  Ctrl+/ help  ·  q quit"
 	case panelURL:
-		return "←→/Home/End move in URL  ·  ↑↓/Ctrl+K,J method  ·  Ctrl+P,N switch tab  ·  Enter edit content  ·  Ctrl+R send  ·  Tab next panel  ·  Ctrl+S,U,B,E jump panel  ·  Ctrl+/ help"
+		hint := "←→/Home/End move in URL  ·  ↑↓/Ctrl+K,J method  ·  Ctrl+P,N switch tab  ·  Enter edit content"
+		if a.activeTab == tabBody {
+			hint += "  ·  Ctrl+Y body type"
+		}
+		return hint + "  ·  Ctrl+R send  ·  Ctrl+G code  ·  Ctrl+T theme  ·  Tab next panel  ·  Ctrl+S,U,B,E jump panel  ·  Ctrl+/ help"
 	case panelResponse:
 		return "↑↓ scroll  ·  PgUp/PgDn page  ·  Tab next panel  ·  Ctrl+/ help"
 	}
@@ -136,7 +144,7 @@ func renderStatus(v *gocui.View, a *App) {
 	if a.sending {
 		text = "⏳ " + text
 	}
-	hints := ansiWrap(footerHints(a), colorMuted, false)
+	hints := ansiWrap(footerHints(a), currentTheme.Muted, false)
 	setViewText(v, hints+"\n"+text)
 }
 
@@ -148,7 +156,7 @@ func renderResponse(v *gocui.View, a *App) {
 		return
 	}
 	if a.respErr != nil {
-		setViewText(v, ansiWrap("Error:", colorError, true)+"\n"+fmt.Sprintf("%v", a.respErr))
+		setViewText(v, ansiWrap("Error:", currentTheme.Error, true)+"\n"+fmt.Sprintf("%v", a.respErr))
 		return
 	}
 	if a.response == nil {
@@ -157,7 +165,7 @@ func renderResponse(v *gocui.View, a *App) {
 	}
 
 	statusText := ansiWrap(fmt.Sprintf("%d %s", a.response.StatusCode, a.response.Status), statusColor(a.response.StatusCode), true)
-	infoText := ansiWrap(fmt.Sprintf("%s  |  %d bytes", a.response.Elapsed.Round(time.Millisecond), a.response.Size), colorMuted, false)
+	infoText := ansiWrap(fmt.Sprintf("%s  |  %d bytes", a.response.Elapsed.Round(time.Millisecond), a.response.Size), currentTheme.Muted, false)
 
 	var headerPreview strings.Builder
 	headerLines := strings.Split(a.response.HeaderStr, "\n")
@@ -172,7 +180,7 @@ func renderResponse(v *gocui.View, a *App) {
 		}
 		key, val, ok := strings.Cut(line, ": ")
 		if ok {
-			headerPreview.WriteString(ansiWrap(key, colorPrimary, true) + ": " + val + "\n")
+			headerPreview.WriteString(ansiWrap(key, currentTheme.Primary, true) + ": " + val + "\n")
 		} else {
 			headerPreview.WriteString(line + "\n")
 		}
@@ -180,59 +188,120 @@ func renderResponse(v *gocui.View, a *App) {
 
 	body := highlightJSON(a.response.Body)
 
-	setViewText(v, statusText+"  "+infoText+"\n"+headerPreview.String()+"\n"+body)
+	testSummary := renderTestSummary(a)
+
+	setViewText(v, statusText+"  "+infoText+"\n"+headerPreview.String()+testSummary+"\n"+body)
+}
+
+// renderTestSummary renders the Scripts tab's test results (if any test
+// script ran) as a pass/fail line plus per-test detail for failures.
+func renderTestSummary(a *App) string {
+	var b strings.Builder
+	if a.scriptErr != "" {
+		b.WriteString(ansiWrap("Script error: ", currentTheme.Error, true) + a.scriptErr + "\n")
+	}
+	if len(a.testResults) == 0 {
+		return b.String()
+	}
+	passed, failed := 0, 0
+	for _, tr := range a.testResults {
+		if tr.Passed {
+			passed++
+		} else {
+			failed++
+		}
+	}
+	summary := fmt.Sprintf("✓ %d passed", passed)
+	if failed > 0 {
+		summary += fmt.Sprintf(" · ✗ %d failed", failed)
+	}
+	color := currentTheme.Success
+	if failed > 0 {
+		color = currentTheme.Error
+	}
+	b.WriteString(ansiWrap(summary, color, true) + "\n")
+	for _, tr := range a.testResults {
+		if tr.Passed {
+			continue
+		}
+		b.WriteString(ansiWrap("  ✗ "+tr.Name, currentTheme.Error, false))
+		if tr.Err != "" {
+			b.WriteString(": " + tr.Err)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 // helpSections lists every keybinding grouped by the context it applies in,
-// rendered by the Ctrl+/ overlay (see toggleHelp in keybindings.go).
-var helpSections = []struct {
+// rendered by the Ctrl+/ overlay (see toggleHelp in keybindings.go). Key
+// labels are pulled from km so an edited ~/.curlmoon/keybindings.json shows
+// up here too, instead of drifting from the actual bindings.
+func helpSections(km config.Keymap) []struct {
 	title string
 	rows  [][2]string
-}{
-	{"Global", [][2]string{
-		{"Tab", "cycle sidebar → URL → response"},
-		{"Ctrl+S / Ctrl+U / Ctrl+E", "jump to sidebar / URL / response"},
-		{"Ctrl+B", "jump into content editor"},
-		{"Ctrl+/", "toggle this help"},
-		{"q, Ctrl+C", "quit"},
-	}},
-	{"Sidebar", [][2]string{
-		{"↑↓, j/k", "navigate"},
-		{"Enter", "open request / toggle folder"},
-		{"n", "new collection / environment"},
-		{"a", "add request"},
-		{"r", "rename"},
-		{"d", "delete"},
-		{"v", "edit environment vars"},
-	}},
-	{"URL bar", [][2]string{
-		{"←→, Home/End", "move cursor"},
-		{"↑↓, Ctrl+K/J", "cycle HTTP method"},
-		{"Ctrl+P/N", "switch tab (Headers/Body/Auth/Params)"},
-		{"Enter", "edit tab content"},
-		{"Ctrl+R", "send request"},
-	}},
-	{"Content editor", [][2]string{
-		{"Esc", "save & exit editor"},
-		{"Ctrl+R", "send request"},
-	}},
-	{"Response", [][2]string{
-		{"↑↓", "scroll"},
-		{"PgUp/PgDn", "page"},
-	}},
-	{"Prompt", [][2]string{
-		{"Enter", "confirm"},
-		{"Esc", "cancel"},
-		{"y/n", "confirm/cancel delete"},
-	}},
+} {
+	k := km.DisplayKey
+	return []struct {
+		title string
+		rows  [][2]string
+	}{
+		{"Global", [][2]string{
+			{k("cycleFocus"), "cycle sidebar → URL → response"},
+			{k("jumpSidebar") + "/" + k("jumpURL") + "/" + k("jumpResponse"), "jump to sidebar / URL / response"},
+			{k("jumpContent"), "jump into content editor"},
+			{k("toggleHelp"), "toggle this help"},
+			{k("toggleCodegen"), "generate code (curl/Go/Python/JS)"},
+			{k("toggleTheme"), "toggle light/dark theme"},
+			{k("quit"), "quit (sidebar/response/overlays only, not while typing)"},
+			{"Ctrl+C", "force quit, always works"},
+		}},
+		{"Sidebar", [][2]string{
+			{k("sidebarUp") + "/" + k("sidebarDown") + ", j/k", "navigate"},
+			{k("sidebarEnter"), "open request / toggle folder"},
+			{k("sidebarNewCollection"), "new collection / environment"},
+			{k("sidebarNewRequest"), "add request"},
+			{k("sidebarRename"), "rename"},
+			{k("sidebarDelete"), "delete"},
+			{k("sidebarEditVars"), "edit environment vars"},
+			{k("sidebarExport"), "export collection"},
+			{k("sidebarImport"), "import collection"},
+		}},
+		{"URL bar", [][2]string{
+			{"←→, Home/End", "move cursor"},
+			{k("urlMethodUp") + "/" + k("urlMethodDown") + ", Ctrl+K/J", "cycle HTTP method"},
+			{k("urlSwitchTabPrev") + "/" + k("urlSwitchTabNext"), "switch tab (Headers/Body/Auth/Params/Scripts)"},
+			{k("cycleBodyType"), "cycle body type (Body tab only)"},
+			{k("urlEnterContent"), "edit tab content"},
+			{k("sendRequest"), "send request"},
+		}},
+		{"Content editor", [][2]string{
+			{k("contentEsc"), "save & exit editor"},
+			{k("sendRequest"), "send request"},
+		}},
+		{"Response", [][2]string{
+			{k("responseScrollUp") + "/" + k("responseScrollDown"), "scroll"},
+			{k("responsePageUp") + "/" + k("responsePageDown"), "page"},
+		}},
+		{"Code gen overlay", [][2]string{
+			{"Tab/Backspace", "cycle language"},
+			{k("toggleCodegen"), "close"},
+		}},
+		{"Prompt", [][2]string{
+			{"Enter", "confirm"},
+			{"Esc", "cancel"},
+			{"y/n", "confirm/cancel delete"},
+		}},
+	}
 }
 
-// helpText renders helpSections into the fixed-width columns the overlay
-// draws, and reports the content's natural width/height so the caller can
-// size the floating view around it.
-func helpText() (text string, width, height int) {
+// helpText renders helpSections(km) into the fixed-width columns the
+// overlay draws, and reports the content's natural width/height so the
+// caller can size the floating view around it.
+func helpText(km config.Keymap) (text string, width, height int) {
+	sections := helpSections(km)
 	keyW := 0
-	for _, s := range helpSections {
+	for _, s := range sections {
 		for _, row := range s.rows {
 			if len(row[0]) > keyW {
 				keyW = len(row[0])
@@ -242,12 +311,12 @@ func helpText() (text string, width, height int) {
 	var b strings.Builder
 	lineW := 0
 	lines := 0
-	for i, s := range helpSections {
+	for i, s := range sections {
 		if i > 0 {
 			b.WriteString("\n")
 			lines++
 		}
-		b.WriteString(ansiWrap(s.title, colorSecondary, true))
+		b.WriteString(ansiWrap(s.title, currentTheme.Secondary, true))
 		b.WriteString("\n")
 		lines++
 		for _, row := range s.rows {
@@ -255,7 +324,7 @@ func helpText() (text string, width, height int) {
 			if len(line) > lineW {
 				lineW = len(line)
 			}
-			b.WriteString(ansiWrap(fmt.Sprintf("  %-*s", keyW, row[0]), colorPrimary, true))
+			b.WriteString(ansiWrap(fmt.Sprintf("  %-*s", keyW, row[0]), currentTheme.Primary, true))
 			b.WriteString("  " + row[1] + "\n")
 			lines++
 		}
@@ -279,5 +348,9 @@ func renderPrompt(v *gocui.View, a *App) {
 		v.Title = "Rename environment to"
 	case "confirmDeleteEnv":
 		v.Title = fmt.Sprintf("Delete environment %q? (y/n)", a.promptTarget.name)
+	case "exportPath":
+		v.Title = "Export to path"
+	case "importPath":
+		v.Title = "Import from path"
 	}
 }

@@ -1,6 +1,9 @@
 package collection
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestNewRequestItem(t *testing.T) {
 	item := NewRequestItem("Get todo", "GET", "https://example.com/todo", map[string]string{"X-Api-Key": "abc"}, "", "")
@@ -67,6 +70,75 @@ func TestCollection_AddRemoveRenameItem(t *testing.T) {
 	}
 	if c.RenameItem(nil, "x") {
 		t.Error("expected empty-path rename to fail")
+	}
+}
+
+func TestGraphQLBody_RoundTrip(t *testing.T) {
+	item := Item{
+		Name: "GraphQL query",
+		Request: &Request{
+			Method: "POST",
+			URL:    URL{Raw: "https://example.com/graphql"},
+			Body: &Body{
+				Mode:    "graphql",
+				GraphQL: &GraphQLBody{Query: "query { me { id } }", Variables: `{"id":1}`},
+			},
+		},
+	}
+	data, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+	var roundtrip Item
+	if err := json.Unmarshal(data, &roundtrip); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	if roundtrip.Request.Body.Mode != "graphql" {
+		t.Errorf("expected mode graphql, got %s", roundtrip.Request.Body.Mode)
+	}
+	if roundtrip.Request.Body.GraphQL.Query != "query { me { id } }" {
+		t.Errorf("expected query preserved, got %s", roundtrip.Request.Body.GraphQL.Query)
+	}
+	if roundtrip.Request.Body.GraphQL.Variables != `{"id":1}` {
+		t.Errorf("expected variables preserved, got %s", roundtrip.Request.Body.GraphQL.Variables)
+	}
+}
+
+func TestEvent_ScriptRoundTrip(t *testing.T) {
+	item := Item{
+		Name:    "With scripts",
+		Request: &Request{Method: "GET", URL: URL{Raw: "https://example.com"}},
+		Event: []Event{
+			{Listen: "prerequest", Script: NewScript("pm.environment.set(\"x\", \"1\");")},
+			{Listen: "test", Script: NewScript("pm.test(\"ok\", () => true);\npm.test(\"also ok\", () => true);")},
+		},
+	}
+	data, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+	var roundtrip Item
+	if err := json.Unmarshal(data, &roundtrip); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	if len(roundtrip.Event) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(roundtrip.Event))
+	}
+	if roundtrip.Event[0].Listen != "prerequest" || roundtrip.Event[0].Script.ExecText() != "pm.environment.set(\"x\", \"1\");" {
+		t.Errorf("unexpected prerequest event: %+v", roundtrip.Event[0])
+	}
+	if roundtrip.Event[1].Listen != "test" || roundtrip.Event[1].Script.ExecText() != "pm.test(\"ok\", () => true);\npm.test(\"also ok\", () => true);" {
+		t.Errorf("unexpected test event: %+v", roundtrip.Event[1])
+	}
+}
+
+func TestNewScript_Empty(t *testing.T) {
+	s := NewScript("")
+	if len(s.Exec) != 0 {
+		t.Errorf("expected empty exec, got %v", s.Exec)
+	}
+	if s.ExecText() != "" {
+		t.Errorf("expected empty ExecText, got %q", s.ExecText())
 	}
 }
 

@@ -27,9 +27,15 @@ the keyboard.
 - Collections of requests, persisted as Postman v2.1-compatible JSON
 - Environments with `{{variable}}` substitution in the URL, headers, and body
 - Auth helpers: Basic, Bearer, API Key, OAuth2 (token)
+- GraphQL body type (query + variables)
+- Pre-request/test scripts (`pm.*` API, powered by [goja](https://github.com/dop251/goja))
+- Code generation: curl, Go, Python, JavaScript (`Ctrl+G`)
+- Export (`x`) / import (`i`) collections from the sidebar, on top of `-c`/`--collection` at startup
 - Request history (last 50 sends, reloadable)
 - JSON syntax-highlighted, scrollable response viewer
 - Session auto-save/restore between runs
+- Configurable keybindings (`~/.curlmoon/keybindings.json`)
+- Light/dark theme (`Ctrl+T`)
 - A full keybinding reference built in (`Ctrl+/`)
 
 ## Install

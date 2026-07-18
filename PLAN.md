@@ -6,12 +6,10 @@ Postman TUI de bolsillo para Termux. Stack: **Go + Bubble Tea**.
 
 | Capa | Tecnología |
 |------|-----------|
-| Lenguaje | Go 1.22+ |
-| TUI Framework | [Bubble Tea](https://github.com/charmbracelet/bubbletea) |
-| Estilos | [Lipgloss](https://github.com/charmbracelet/lipgloss) |
-| Componentes | [Bubbles](https://github.com/charmbracelet/bubbles) |
+| Lenguaje | Go 1.25+ |
+| TUI Framework | [gocui](https://github.com/jesseduffield/gocui) (lazygit) + termbox |
 | HTTP | `net/http` estándar |
-| Scripting | [goja](https://github.com/dop251/goja) (Fase 5) |
+| Scripting | [goja](https://github.com/dop251/goja) |
 | Storage | Archivos JSON en `~/.curlmoon/` |
 
 ## Layout
@@ -69,13 +67,13 @@ Postman TUI de bolsillo para Termux. Stack: **Go + Bubble Tea**.
 - [x] Historial de requests (sección "History" en el sidebar, hasta 50 entradas, Enter para recargar)
 - [x] Tests: nuevos paquetes `internal/environment` y `internal/history` + wiring en `internal/tui`
 
-### Fase 5 — Power features
-- [ ] GraphQL (query + variables)
-- [ ] Pre-request / Test scripts con goja (API `pm.*`)
-- [ ] Code generation (curl, Go, Python, JS)
-- [ ] Export/Import collection v2.1
-- [ ] Keybindings configurables
-- [ ] Temas claro/oscuro
+### Fase 5 — Power features ✅
+- [x] GraphQL (query + variables) — nuevo tipo de Body "GraphQL" con formato `query` + `### variables` + JSON, persistido como `Body.graphql` (Postman v2.1)
+- [x] Pre-request / Test scripts con goja (API `pm.*`) — tab "Scripts" (`### pre-request` / `### test`), ejecutados vía `internal/script`, resultados mostrados en la respuesta
+- [x] Code generation (curl, Go, Python, JS) — overlay `Ctrl+G` (`internal/codegen`), cicla lenguaje con Tab/Backspace
+- [x] Export/Import collection v2.1 — `x`/`i` en el sidebar (`Store.Export`, `Store.Import` ya existente); scripts y GraphQL se conservan en el round-trip
+- [x] Keybindings configurables — `~/.curlmoon/keybindings.json`, ver `internal/config`; el overlay de ayuda (`Ctrl+/`) refleja las teclas configuradas
+- [x] Temas claro/oscuro — `Ctrl+T`, persistido en `~/.curlmoon/config.json` (`internal/config`)
 
 ## Testing
 

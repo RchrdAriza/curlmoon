@@ -32,9 +32,9 @@ func highlightJSON(text string) string {
 			}
 			str := text[i:j]
 			if j < len(text) && text[j] == ':' {
-				out.WriteString(ansiWrap(str, colorPrimary, false))
+				out.WriteString(ansiWrap(str, currentTheme.Primary, false))
 			} else {
-				out.WriteString(ansiWrap(str, colorSuccess, false))
+				out.WriteString(ansiWrap(str, currentTheme.Success, false))
 			}
 			i = j
 
@@ -43,17 +43,17 @@ func highlightJSON(text string) string {
 			for j < len(text) && (text[j] >= '0' && text[j] <= '9' || text[j] == '.' || text[j] == '-' || text[j] == 'e' || text[j] == 'E' || text[j] == '+') {
 				j++
 			}
-			out.WriteString(ansiWrap(text[i:j], colorSecondary, false))
+			out.WriteString(ansiWrap(text[i:j], currentTheme.Secondary, false))
 			i = j
 
 		case strings.HasPrefix(strings.ToLower(text[i:]), "true"):
-			out.WriteString(ansiWrap("true", colorMagenta, false))
+			out.WriteString(ansiWrap("true", currentTheme.Magenta, false))
 			i += 4
 		case strings.HasPrefix(strings.ToLower(text[i:]), "false"):
-			out.WriteString(ansiWrap("false", colorMagenta, false))
+			out.WriteString(ansiWrap("false", currentTheme.Magenta, false))
 			i += 5
 		case strings.HasPrefix(strings.ToLower(text[i:]), "null"):
-			out.WriteString(ansiWrap("null", colorMuted, false))
+			out.WriteString(ansiWrap("null", currentTheme.Muted, false))
 			i += 4
 
 		case ch == '{' || ch == '}' || ch == '[' || ch == ']' || ch == ',' || ch == ':':
