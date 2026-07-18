@@ -416,6 +416,18 @@ func layout(g *gocui.Gui, a *App) error {
 		}
 	}
 
+	// Show the terminal cursor only in views you actually type into (url,
+	// content editor, prompt, envedit). Navigation panels like the sidebar
+	// draw their own "> " selector, so a blinking block cursor there just
+	// competes with it and reads as confusing. g.Cursor is global but read
+	// once per frame against g.currentView (see gocui Gui.draw), so keying
+	// it off the now-resolved current view's Editable flag is enough.
+	if cv := g.CurrentView(); cv != nil {
+		g.Cursor = cv.Editable
+	} else {
+		g.Cursor = false
+	}
+
 	return nil
 }
 

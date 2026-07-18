@@ -18,7 +18,14 @@ func Run(store *collection.Store, extra ...*collection.Collection) error {
 	}
 	defer g.Close()
 
+	// Initial cursor visibility; layout() re-derives this every frame from
+	// the focused view (shown only in editable views — see views.go), so the
+	// sidebar's own "> " selector isn't shadowed by a terminal cursor.
 	g.Cursor = true
+	// Enable terminal mouse reporting so panels can be focused by tapping —
+	// the same touch support lazygit has. Handlers are registered in
+	// setupMouseBindings; without g.Mouse = true they'd simply never fire.
+	g.Mouse = true
 	// Without this, gocui puts termbox in "Alt" input mode, where a lone
 	// ESC byte is held back waiting to see if it's the start of an
 	// Alt+<key> combo — so pressing plain Esc (e.g. to cancel the sidebar
@@ -29,6 +36,9 @@ func Run(store *collection.Store, extra ...*collection.Collection) error {
 	g.SetLayout(newLayoutFunc(a))
 
 	if err := setupKeybindings(g, a); err != nil {
+		return err
+	}
+	if err := setupMouseBindings(g, a); err != nil {
 		return err
 	}
 
