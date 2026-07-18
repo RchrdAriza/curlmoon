@@ -362,6 +362,11 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 					a.statusMsg = fmt.Sprintf("Body type: %s", bodyTypes[a.bodyType])
 					renderStatus(sv, a)
 				}
+				if a.bodyType == 1 {
+					if cv, err := g.View("content"); err == nil {
+						recolorJSON(cv)
+					}
+				}
 			case tabAuth:
 				a.CycleAuthType(delta)
 				if sv, err := g.View("status"); err == nil {

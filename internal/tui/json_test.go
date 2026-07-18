@@ -82,6 +82,39 @@ func TestHighlightJSON_PreservesStructure(t *testing.T) {
 	}
 }
 
+func TestLeadingWhitespace(t *testing.T) {
+	tests := []struct{ line, want string }{
+		{"", ""},
+		{"foo", ""},
+		{"  foo", "  "},
+		{"\tfoo", "\t"},
+		{"   ", "   "},
+	}
+	for _, tt := range tests {
+		if got := leadingWhitespace(tt.line); got != tt.want {
+			t.Errorf("leadingWhitespace(%q) = %q, want %q", tt.line, got, tt.want)
+		}
+	}
+}
+
+func TestDisplayContentText(t *testing.T) {
+	a := &App{bodyText: `{"a":1}`, headersText: `{"a":1}`}
+
+	a.bodyType = 1 // JSON
+	if got := displayContentText(a, tabBody); got == a.bodyText {
+		t.Error("expected JSON body text to come back syntax-highlighted (changed from the raw text)")
+	}
+
+	a.bodyType = 2 // raw
+	if got := displayContentText(a, tabBody); got != a.bodyText {
+		t.Errorf("expected non-JSON body type to pass through unchanged, got %q", got)
+	}
+
+	if got := displayContentText(a, tabHeaders); got != a.headersText {
+		t.Errorf("expected headers tab to never be highlighted, got %q", got)
+	}
+}
+
 func TestHighlightJSON_EdgeCases(t *testing.T) {
 	tests := []struct {
 		name  string

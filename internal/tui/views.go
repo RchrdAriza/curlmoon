@@ -24,6 +24,18 @@ func contentText(a *App, tab int) string {
 	return ""
 }
 
+// displayContentText returns the text loadContentTab (and the initial
+// "content" view seed in layout) should render for the given tab: the raw
+// per-tab buffer, except for a JSON body, which gets syntax-highlighted the
+// same way live edits do in jsonBody's Edit handling (see editor.go).
+func displayContentText(a *App, tab int) string {
+	text := contentText(a, tab)
+	if tab == tabBody && a.bodyType == 1 {
+		return highlightJSON(text)
+	}
+	return text
+}
+
 // loadContentTab overwrites the "content" view with the text for the
 // currently active tab. Call this only right after switching tabs (never
 // while the user might be mid-edit on the same tab).
@@ -33,7 +45,7 @@ func loadContentTab(g *gocui.Gui, a *App) {
 		return
 	}
 	v.Editable = true
-	setViewText(v, contentText(a, a.activeTab))
+	setViewText(v, displayContentText(a, a.activeTab))
 	v.SetCursor(0, 0)
 	v.SetOrigin(0, 0)
 }
@@ -201,7 +213,7 @@ func layout(g *gocui.Gui, a *App) error {
 		v.Frame = false
 		v.Title = "Headers"
 		v.Editable = true
-		setViewText(v, contentText(a, a.activeTab))
+		setViewText(v, displayContentText(a, a.activeTab))
 	}
 	if v, err := g.View("content"); err == nil {
 		if a.envEditIdx >= 0 {
