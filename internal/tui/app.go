@@ -502,8 +502,7 @@ func (a *App) HandleResponse(resp *httpclient.Response, err error) {
 	a.response = resp
 	a.respErr = nil
 	a.showResp = true
-	a.statusMsg = fmt.Sprintf("%d %s — %v — %d bytes",
-		resp.StatusCode, resp.Status, resp.Elapsed, resp.Size)
+	a.statusMsg = fmt.Sprintf("%d %s", resp.StatusCode, resp.Status)
 	a.recordHistory("", resp.StatusCode, resp.Elapsed.String())
 }
 
@@ -664,7 +663,7 @@ func (a *App) SelectSidebarEntry() bool {
 	a.activeCollIdx = item.collIdx
 	a.activeItemPath = append([]int{}, item.itemPath...)
 	a.activePanel = panelURL
-	a.statusMsg = fmt.Sprintf("Loaded: %s %s", item.method, item.url)
+	a.statusMsg = fmt.Sprintf("Loaded %q", item.name)
 	return true
 }
 
@@ -735,7 +734,7 @@ func (a *App) loadHistoryEntry(idx int) bool {
 		}
 	}
 	a.activePanel = panelURL
-	a.statusMsg = fmt.Sprintf("Loaded from history: %s %s", h.Method, h.URL)
+	a.statusMsg = "Loaded from history"
 	return true
 }
 

@@ -116,48 +116,52 @@ func renderTabs(v *gocui.View, a *App) {
 // HTTP method while the URL panel is focused).
 func footerHints(a *App) string {
 	if a.fbMode == "import" {
-		return "↑↓/jk navigate  ·  Enter open/import  ·  ←/h up a level  ·  Esc cancel"
+		return "↑↓ nav · Enter open/import · ← up · Esc cancel"
 	}
 	if a.fbMode == "export" {
-		return "↑↓/jk navigate  ·  Enter open folder  ·  ←/h up a level  ·  Ctrl+S save here  ·  Esc cancel"
+		return "↑↓ nav · Enter open · ← up · Ctrl+S save · Esc cancel"
 	}
 	if a.showCodegen {
-		return "Tab/Shift+Tab language  ·  Ctrl+G close"
+		return "Tab language · Ctrl+G close"
 	}
 	if a.showHelp {
-		return "Esc or Ctrl+/ close help"
+		return "Esc close help"
 	}
 	if a.promptMode != "" {
-		return "Enter confirm  ·  Esc cancel"
+		return "Enter confirm · Esc cancel"
 	}
 	if a.subFocus {
-		return "Esc save & exit editor  ·  Ctrl+R send  ·  Tab next panel  ·  Ctrl+/ help"
+		return "Esc exit editor · Ctrl+R send · Tab panel · Ctrl+/ help"
 	}
 	switch a.activePanel {
 	case panelSidebar:
-		return "↑↓/jk navigate  ·  Enter open/toggle  ·  n new  ·  a add request  ·  r rename  ·  d delete  ·  v edit vars  ·  x export  ·  i import  ·  Tab next panel  ·  Ctrl+/ help  ·  q quit"
+		return "↑↓ nav · Enter open · n new · a add · r rename · d delete · v vars · x export · i import · Ctrl+/ help"
 	case panelURL:
-		hint := "←→/Home/End move in URL  ·  ↑↓/Ctrl+K,J method  ·  Ctrl+P,N switch tab  ·  Enter edit content"
+		hint := "←→ move · ↑↓ method · Ctrl+P,N tab · Enter edit"
 		if a.activeTab == tabBody {
-			hint += "  ·  Ctrl+Y body type"
+			hint += " · Ctrl+Y body type"
 		}
 		if a.activeTab == tabAuth {
-			hint += "  ·  Ctrl+Y auth type"
+			hint += " · Ctrl+Y auth type"
 		}
-		return hint + "  ·  Ctrl+R send  ·  Ctrl+G code  ·  Ctrl+T theme  ·  Tab next panel  ·  Ctrl+S,U,B,E jump panel  ·  Ctrl+/ help"
+		return hint + " · Ctrl+R send · Ctrl+G code · Ctrl+/ help"
 	case panelResponse:
-		return "↑↓ scroll  ·  PgUp/PgDn page  ·  Tab next panel  ·  Ctrl+/ help"
+		return "↑↓ scroll · PgUp/PgDn page · Tab panel · Ctrl+/ help"
 	}
-	return "Tab cycle panels  ·  Ctrl+S,U,B,E jump panel  ·  Ctrl+/ help  ·  q quit"
+	return "Tab panels · Ctrl+/ help · q quit"
 }
 
+// renderStatus draws the single-line footer: just the context hints. It no
+// longer echoes a.statusMsg — that line duplicated data already shown in the
+// dedicated panels (response status, loaded method/URL, body/auth type). A
+// spinner glyph is prepended while a request is in flight so there's still
+// feedback that something is happening.
 func renderStatus(v *gocui.View, a *App) {
-	text := a.statusMsg
+	hints := footerHints(a)
 	if a.sending {
-		text = "⏳ " + text
+		hints = "⏳ Sending…  ·  " + hints
 	}
-	hints := ansiWrap(footerHints(a), currentTheme.Muted, false)
-	setViewText(v, hints+"\n"+text)
+	setViewText(v, ansiWrap(hints, currentTheme.Muted, false))
 }
 
 func renderResponse(v *gocui.View, a *App) {

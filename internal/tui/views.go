@@ -117,7 +117,7 @@ func layout(g *gocui.Gui, a *App) error {
 		rightX0 = maxX - 3
 	}
 
-	if v, err := g.SetView("sidebar", 0, 0, sidebarW, maxY-4); err != nil {
+	if v, err := g.SetView("sidebar", 0, 0, sidebarW, maxY-3); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
@@ -128,7 +128,7 @@ func layout(g *gocui.Gui, a *App) error {
 	}
 	if v, err := g.View("sidebar"); err == nil {
 		focused := a.activePanel == panelSidebar
-		drawBorder(g, 0, 0, sidebarW, maxY-4, borderColor(focused), "[^S] "+v.Title)
+		drawBorder(g, 0, 0, sidebarW, maxY-3, borderColor(focused), "[^S] "+v.Title)
 	}
 
 	methodW := 9
@@ -178,12 +178,12 @@ func layout(g *gocui.Gui, a *App) error {
 	}
 	drawBorder(g, rightX0, 3, maxX-1, 5, borderColor(false), "")
 
-	contentY1 := 6 + (maxY-4-6)/2
+	contentY1 := 6 + (maxY-3-6)/2
 	if contentY1 < 10 {
 		contentY1 = 10
 	}
-	if contentY1 > maxY-7 {
-		contentY1 = maxY - 7
+	if contentY1 > maxY-6 {
+		contentY1 = maxY - 6
 	}
 	if contentY1 < 8 {
 		contentY1 = 8
@@ -216,7 +216,7 @@ func layout(g *gocui.Gui, a *App) error {
 		}
 	}
 
-	if v, err := g.SetView("response", rightX0, contentY1+1, maxX-1, maxY-4); err != nil {
+	if v, err := g.SetView("response", rightX0, contentY1+1, maxX-1, maxY-3); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
@@ -228,10 +228,10 @@ func layout(g *gocui.Gui, a *App) error {
 	}
 	{
 		focused := a.activePanel == panelResponse
-		drawBorder(g, rightX0, contentY1+1, maxX-1, maxY-4, borderColor(focused), "[^E] "+focusTitle("Response", focused))
+		drawBorder(g, rightX0, contentY1+1, maxX-1, maxY-3, borderColor(focused), "[^E] "+focusTitle("Response", focused))
 	}
 
-	if v, err := g.SetView("status", 0, maxY-3, maxX-1, maxY); err != nil {
+	if v, err := g.SetView("status", 0, maxY-2, maxX-1, maxY); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
@@ -287,7 +287,7 @@ func layout(g *gocui.Gui, a *App) error {
 		if w > maxX-4 {
 			w = maxX - 4
 		}
-		if h > maxY-4 {
+		if h > maxY-3 {
 			h = maxY - 4
 		}
 		x0, y0 := (maxX-w)/2, (maxY-h)/2
@@ -386,7 +386,7 @@ func layout(g *gocui.Gui, a *App) error {
 		if w > maxX-4 {
 			w = maxX - 4
 		}
-		if h > maxY-4 {
+		if h > maxY-3 {
 			h = maxY - 4
 		}
 		x0, y0 := (maxX-w)/2, (maxY-h)/2
