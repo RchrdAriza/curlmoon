@@ -333,6 +333,12 @@ func (a *App) restoreSession() {
 	if sess.Scripts != "" {
 		a.scriptsText = sess.Scripts
 	}
+	if len(sess.Collapsed) > 0 {
+		a.collapsed = sess.Collapsed
+		// The sidebar was flattened before the session loaded; re-flatten now
+		// so restored-collapsed folders actually hide their children.
+		a.rebuildSidebar()
+	}
 }
 
 func (a *App) saveSession() {
@@ -348,6 +354,14 @@ func (a *App) saveSession() {
 		AuthText:  a.authText,
 		Scripts:   a.scriptsText,
 		ActiveTab: a.activeTab,
+	}
+	for k, v := range a.collapsed {
+		if v {
+			if sess.Collapsed == nil {
+				sess.Collapsed = make(map[string]bool)
+			}
+			sess.Collapsed[k] = true
+		}
 	}
 	for _, p := range parseKV(a.headersText) {
 		sess.Headers = append(sess.Headers, collection.KeyVal{Key: p.Key, Value: p.Value})

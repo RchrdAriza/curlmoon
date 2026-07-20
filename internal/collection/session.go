@@ -19,6 +19,11 @@ type Session struct {
 	AuthText  string   `json:"auth_text,omitempty"`
 	Scripts   string   `json:"scripts,omitempty"`
 	ActiveTab int      `json:"active_tab"`
+
+	// Collapsed remembers which sidebar folders the user has collapsed, keyed
+	// the same way the TUI keys them (see tui.sidebarFolderKey), so closing a
+	// collection to reclaim screen space survives a restart.
+	Collapsed map[string]bool `json:"collapsed,omitempty"`
 }
 
 func (s *Store) sessionPath() string {

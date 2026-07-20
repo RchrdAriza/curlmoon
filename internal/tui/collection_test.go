@@ -380,3 +380,45 @@ func TestSessionRoundTrip_ThroughApp(t *testing.T) {
 		t.Errorf("expected header restored, got %+v", pairs)
 	}
 }
+
+// TestCollapsedStatePersists verifies that collapsing a sidebar folder to
+// reclaim screen space survives a restart, instead of springing back open.
+func TestCollapsedStatePersists(t *testing.T) {
+	store := collection.NewStore(t.TempDir())
+	if err := store.Save(&collection.Collection{
+		Info: collection.Info{Name: "MyColl"},
+		Item: []collection.Item{{Name: "GET /a", Request: &collection.Request{Method: "GET", URL: collection.URL{Raw: "https://example.com/a"}}}},
+	}); err != nil {
+		t.Fatalf("save collection: %v", err)
+	}
+
+	a := NewAppWithStore(store)
+	// Find and collapse the "MyColl" folder.
+	target := -1
+	for i, e := range a.sidebar {
+		if e.name == "MyColl" && e.isFolder {
+			target = i
+			break
+		}
+	}
+	if target < 0 {
+		t.Fatalf("MyColl folder not found in sidebar: %+v", a.sidebar)
+	}
+	a.sidebarSel = target
+	a.SelectSidebarEntry() // toggles collapse on a folder
+
+	// Its child request should now be hidden.
+	for _, e := range a.sidebar {
+		if e.name == "GET /a" {
+			t.Fatalf("expected child hidden after collapse")
+		}
+	}
+	a.saveSession()
+
+	a2 := NewAppWithStore(store)
+	for _, e := range a2.sidebar {
+		if e.name == "GET /a" {
+			t.Fatalf("expected collapse state to persist across restart, but child is visible")
+		}
+	}
+}
