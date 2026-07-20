@@ -36,12 +36,30 @@ func setupMouseBindings(g *gocui.Gui, a *App) error {
 			if a.subFocus {
 				a.ExitContentEditor()
 			}
+			a.urlEditing = false
 			a.activePanel = name
 			if sv, err := g.View("status"); err == nil {
 				renderStatus(sv, a)
 			}
 			return g.SetCurrentView(name)
 		}
+	}
+
+	// urlTap focuses the URL bar and drops straight into insert mode, so touch
+	// users don't need the "i" key to start typing a URL.
+	urlTap := func(g *gocui.Gui, v *gocui.View) error {
+		syncFromViews(g, a)
+		if a.subFocus {
+			a.ExitContentEditor()
+		}
+		a.activePanel = panelURL
+		a.EnterEditURL()
+		v.Editable = true
+		setURLText(v, a.urlValue)
+		if sv, err := g.View("status"); err == nil {
+			renderStatus(sv, a)
+		}
+		return g.SetCurrentView(panelURL)
 	}
 
 	// sidebarTap focuses the sidebar and selects the tapped row. gocui has
@@ -54,6 +72,7 @@ func setupMouseBindings(g *gocui.Gui, a *App) error {
 		if a.subFocus {
 			a.ExitContentEditor()
 		}
+		a.urlEditing = false
 		alreadyHere := a.activePanel == panelSidebar
 		a.activePanel = panelSidebar
 		_, cy := v.Cursor()
@@ -75,6 +94,7 @@ func setupMouseBindings(g *gocui.Gui, a *App) error {
 	// the same way the urlEnterContent key does.
 	contentTap := func(g *gocui.Gui, v *gocui.View) error {
 		syncFromViews(g, a)
+		a.urlEditing = false
 		if !a.EnterContentEditor() {
 			return nil
 		}
@@ -89,6 +109,7 @@ func setupMouseBindings(g *gocui.Gui, a *App) error {
 	// touched, so the Headers/Body/Auth/Params/Scripts row is tappable.
 	tabsTap := func(g *gocui.Gui, v *gocui.View) error {
 		syncFromViews(g, a)
+		a.urlEditing = false
 		cx, _ := v.Cursor()
 		if tab := tabAtX(cx); tab >= 0 {
 			a.activeTab = tab
@@ -111,7 +132,7 @@ func setupMouseBindings(g *gocui.Gui, a *App) error {
 	}{
 		{panelSidebar, sidebarTap},
 		{"method", focusPanel(panelURL)},
-		{panelURL, focusPanel(panelURL)},
+		{panelURL, urlTap},
 		{"tabs", tabsTap},
 		{"content", contentTap},
 		{panelResponse, focusPanel(panelResponse)},
@@ -191,6 +212,10 @@ func sidebarActivate(g *gocui.Gui, a *App, v *gocui.View) error {
 	if mv, err := g.View("method"); err == nil {
 		renderMethod(mv, a)
 	}
+	// Mirror sidebarEnter: refresh the content view so the newly loaded
+	// request's tab buffers replace the previous request's text on screen
+	// (see the note there).
+	loadContentTab(g, a)
 	renderSidebar(v, a)
 	return g.SetCurrentView("url")
 }

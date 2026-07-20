@@ -16,6 +16,23 @@ func bind(g *gocui.Gui, a *App, view, action string, h gocui.KeybindingHandler) 
 	return g.SetKeybinding(view, key, mod, h)
 }
 
+// refreshRequestViews repaints the URL/method/tabs/content views from App
+// state, used after a change that rewrites several of them at once (e.g.
+// cancelling an edit reverts to a snapshot).
+func refreshRequestViews(g *gocui.Gui, a *App) {
+	if v, err := g.View("url"); err == nil {
+		v.Editable = a.urlEditing
+		setURLText(v, a.urlValue)
+	}
+	if v, err := g.View("method"); err == nil {
+		renderMethod(v, a)
+	}
+	if v, err := g.View("tabs"); err == nil {
+		renderTabs(v, a)
+	}
+	loadContentTab(g, a)
+}
+
 // setupKeybindings wires every keyboard shortcut curlmoon responds to onto
 // the App instance. Handlers stay thin: they sync any live-edited text out
 // of the gocui views, delegate to a pure *App method, then refresh the
@@ -81,6 +98,7 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 			if a.subFocus {
 				a.ExitContentEditor()
 			}
+			a.urlEditing = false
 			a.activePanel = name
 			if sv, err := g.View("status"); err == nil {
 				renderStatus(sv, a)
@@ -164,6 +182,11 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		if mv, err := g.View("method"); err == nil {
 			renderMethod(mv, a)
 		}
+		// SelectSidebarEntry reset the App's per-tab buffers to the newly
+		// loaded request; push them into the "content" view too, otherwise the
+		// previous request's text lingers on screen and the next syncFromViews
+		// (e.g. on tab switch) would read it back and corrupt a.bodyText etc.
+		loadContentTab(g, a)
 		renderSidebar(v, a)
 		return g.SetCurrentView("url")
 	}
@@ -343,6 +366,57 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 		}
 		return nil
 	}
+	// urlEditEnter flips the URL bar into insert mode (the "i" key). When
+	// already editing it's a no-op so the literal "i" just gets typed (gocui
+	// dispatches the key to both this binding and the view's editor).
+	urlEditEnter := func(g *gocui.Gui, v *gocui.View) error {
+		if !a.EnterEditURL() {
+			return nil
+		}
+		// Do NOT set v.Editable here: gocui dispatches this same "i" keystroke
+		// to the view's editor *after* this handler returns, whenever the view
+		// is editable by then — so flipping it on now leaks a literal "i" into
+		// the URL. layout() turns editability on next frame from a.urlEditing
+		// (same deferral rationale as contentFocusPending), before the user's
+		// next keystroke arrives.
+		setURLText(v, a.urlValue)
+		if sv, err := g.View("status"); err == nil {
+			renderStatus(sv, a)
+		}
+		return nil
+	}
+	// urlEditSave commits the URL edit: sync the buffer, persist the request to
+	// its collection item, and drop back to normal (navigation) mode. Bound to
+	// Esc, but only acts while editing so Esc is inert in normal mode.
+	urlEditSave := func(g *gocui.Gui, v *gocui.View) error {
+		if !a.urlEditing {
+			return nil
+		}
+		syncFromViews(g, a)
+		a.urlEditing = false
+		a.SaveActiveRequest()
+		if sv, err := g.View("status"); err == nil {
+			renderStatus(sv, a)
+		}
+		if sbv, err := g.View("sidebar"); err == nil {
+			renderSidebar(sbv, a)
+		}
+		return nil
+	}
+	// editCancel discards the in-progress edit (URL or content), reverting to
+	// the snapshot taken when edit mode began, then repaints the request views
+	// and returns focus to the URL bar. Bound to Ctrl+X in both editors.
+	editCancel := func(g *gocui.Gui, v *gocui.View) error {
+		if !a.inEditMode() {
+			return nil
+		}
+		a.CancelEdit()
+		refreshRequestViews(g, a)
+		if sv, err := g.View("status"); err == nil {
+			renderStatus(sv, a)
+		}
+		return g.SetCurrentView("url")
+	}
 	urlHome := func(g *gocui.Gui, v *gocui.View) error {
 		_ = v.SetOrigin(0, 0)
 		_ = v.SetCursor(0, 0)
@@ -412,23 +486,39 @@ func setupKeybindings(g *gocui.Gui, a *App) error {
 	}{
 		{gocui.KeyCtrlK, urlUp},
 		{gocui.KeyCtrlJ, urlDown},
+		// Modal editing of the URL bar: "i" enters insert mode, Esc saves &
+		// exits, Ctrl+X cancels. These are fixed (not user-configurable) — "i"
+		// is only free to be a command because the URL is non-editable in
+		// normal mode.
+		{gocui.KeyEsc, urlEditSave},
+		{gocui.KeyCtrlX, editCancel},
 	}
 	for _, b := range fixedURLBindings {
 		if err := g.SetKeybinding(panelURL, b.key, gocui.ModNone, b.h); err != nil {
 			return err
 		}
 	}
+	if err := g.SetKeybinding(panelURL, 'i', gocui.ModNone, urlEditEnter); err != nil {
+		return err
+	}
 
 	// --- content (headers/body/params/auth/scripts editor) ---
 	contentEsc := func(g *gocui.Gui, v *gocui.View) error {
 		syncFromViews(g, a)
 		a.ExitContentEditor()
+		a.SaveActiveRequest()
 		if sv, err := g.View("status"); err == nil {
 			renderStatus(sv, a)
+		}
+		if sbv, err := g.View("sidebar"); err == nil {
+			renderSidebar(sbv, a)
 		}
 		return g.SetCurrentView("url")
 	}
 	if err := bind(g, a, "content", "contentEsc", contentEsc); err != nil {
+		return err
+	}
+	if err := g.SetKeybinding("content", gocui.KeyCtrlX, gocui.ModNone, editCancel); err != nil {
 		return err
 	}
 	if err := bind(g, a, "content", "sendRequest", sendRequest); err != nil {

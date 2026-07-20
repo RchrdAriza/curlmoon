@@ -30,6 +30,15 @@ func parseGraphQLBody(text string) (query, variablesJSON string) {
 	return strings.TrimSpace(text), ""
 }
 
+// composeGraphQLBody is the inverse of parseGraphQLBody: it stitches a stored
+// query and its raw variables JSON back into the Body tab's delimited text.
+func composeGraphQLBody(query, variablesJSON string) string {
+	if strings.TrimSpace(variablesJSON) == "" {
+		return query
+	}
+	return query + "\n\n" + graphqlVariablesDelim + "\n" + variablesJSON
+}
+
 // buildGraphQLBody turns the Body tab's raw text into the JSON payload
 // {"query": ..., "variables": ...} that a GraphQL endpoint expects.
 func buildGraphQLBody(text string) (string, error) {

@@ -149,6 +149,26 @@ func (c *Collection) SetMethodAt(path []int, method string) bool {
 	return setMethodAt(c.Item, path, method)
 }
 
+// ItemAt returns a pointer to the item located at path, or (nil, false) if the
+// path doesn't resolve to an item.
+func (c *Collection) ItemAt(path []int) (*Item, bool) {
+	return itemAt(c.Item, path)
+}
+
+func itemAt(items []Item, path []int) (*Item, bool) {
+	if len(path) == 0 {
+		return nil, false
+	}
+	idx := path[0]
+	if idx < 0 || idx >= len(items) {
+		return nil, false
+	}
+	if len(path) == 1 {
+		return &items[idx], true
+	}
+	return itemAt(items[idx].Item, path[1:])
+}
+
 func addAt(items []Item, path []int, item Item) ([]Item, bool) {
 	if len(path) == 0 {
 		return append(items, item), true

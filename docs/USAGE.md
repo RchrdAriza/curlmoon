@@ -82,9 +82,17 @@ The sidebar has three sections:
 
 ## URL bar
 
+The URL bar is **modal** (vim-style): in normal mode keystrokes navigate; you
+press `i` to enter *insert mode* before typing a URL. While anything is
+unsaved, the URL bar border turns yellow and its title shows a `*`.
+
+- `i` — enter insert mode to edit the URL (tap it with the mouse to do the same)
+- `Esc` — save the edit (writing changes back to the loaded request) and
+  return to normal mode
+- `Ctrl+X` — cancel the edit, reverting to the value from when you started
 - `↑↓`, or `Ctrl+K`/`Ctrl+J` — cycle the HTTP method (GET, POST, PUT, PATCH,
   DELETE, HEAD, OPTIONS)
-- `←→`, `Home`, `End` — move the cursor while typing the URL
+- `←→`, `Home`, `End` — move the cursor while editing the URL
 - `Ctrl+P`/`Ctrl+N` — switch tab (Headers → Body → Auth → Params → Scripts →
   back)
 - `Ctrl+Y` — cycle the body type (`none` → `JSON` → `raw` → `form-data` →
@@ -95,6 +103,11 @@ The sidebar has three sections:
 - `Ctrl+G` — open the code generation overlay for the current request
 - `Ctrl+T` — toggle light/dark theme
 
+Editing a request loaded from a collection and pressing `Esc` (or `Ctrl+B`
+`Esc` from the content editor) **persists** the change back to that request on
+disk. `Ctrl+X` discards it instead. Switching to another request without
+saving discards any pending edit (the `*` is your warning).
+
 ## Content editor (Headers / Body / Auth / Params / Scripts)
 
 Headers, Params, and Auth all share one format: one `Key: Value` pair per
@@ -102,7 +115,9 @@ line. Body is free-form text, interpreted according to the body type
 selected for the request (`none`, `JSON`, `raw`, `form-data`,
 `x-www-urlencoded`, `GraphQL`).
 
-- `Esc` — save the buffer and return to the URL bar
+- `Esc` — save the buffer (persisting changes to the loaded request) and
+  return to the URL bar
+- `Ctrl+X` — cancel, discarding edits made since you entered the editor
 - `Ctrl+R` — send the request without leaving the editor
 
 Sending a request injects a `Content-Type` header automatically for JSON,

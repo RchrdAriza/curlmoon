@@ -130,14 +130,14 @@ func footerHints(a *App) string {
 	if a.promptMode != "" {
 		return "Enter confirm · Esc cancel"
 	}
-	if a.subFocus {
-		return "Esc exit editor · Ctrl+R send · Tab panel · Ctrl+/ help"
+	if a.inEditMode() {
+		return "Esc save edit · Ctrl+X cancel · Ctrl+R send · Ctrl+/ help"
 	}
 	switch a.activePanel {
 	case panelSidebar:
 		return "↑↓ nav · Enter open · n new · a add · r rename · d delete · v vars · x export · i import · Ctrl+/ help"
 	case panelURL:
-		hint := "←→ move · ↑↓ method · Ctrl+P,N tab · Enter edit"
+		hint := "i edit URL · ↑↓ method · Ctrl+P,N tab · Enter edit content"
 		if a.activeTab == tabBody {
 			hint += " · Ctrl+Y body type"
 		}
@@ -284,7 +284,9 @@ func helpSections(km config.Keymap) []struct {
 			{k("sidebarImport"), "import collection"},
 		}},
 		{"URL bar", [][2]string{
-			{"←→, Home/End", "move cursor"},
+			{"i", "edit URL (insert mode)"},
+			{"Esc", "save edit · Ctrl+X cancel"},
+			{"←→, Home/End", "move cursor (while editing)"},
 			{k("urlMethodUp") + "/" + k("urlMethodDown") + ", Ctrl+K/J", "cycle HTTP method"},
 			{k("urlSwitchTabPrev") + "/" + k("urlSwitchTabNext"), "switch tab (Headers/Body/Auth/Params/Scripts)"},
 			{k("cycleBodyType"), "cycle body type (Body tab) / auth type (Auth tab)"},
@@ -292,7 +294,8 @@ func helpSections(km config.Keymap) []struct {
 			{k("sendRequest"), "send request"},
 		}},
 		{"Content editor", [][2]string{
-			{k("contentEsc"), "save & exit editor"},
+			{k("contentEsc"), "save edit & exit"},
+			{"Ctrl+X", "cancel edit"},
 			{k("sendRequest"), "send request"},
 		}},
 		{"Response", [][2]string{

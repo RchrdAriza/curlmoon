@@ -144,15 +144,27 @@ func layout(g *gocui.Gui, a *App) error {
 		}
 		v.Frame = false
 		v.Title = "URL"
-		v.Editable = true
 		setURLText(v, a.urlValue)
 		if err := g.SetCurrentView("url"); err != nil {
 			return err
 		}
 	}
+	if v, err := g.View("url"); err == nil {
+		// Modal editing: the URL bar only accepts typing in insert mode
+		// (a.urlEditing); in normal mode keystrokes navigate instead.
+		v.Editable = a.urlEditing
+	}
 	{
 		focused := a.activePanel == panelURL && !a.subFocus
-		drawBorder(g, methodW+1, 0, maxX-1, 2, borderColor(focused), "[^U] "+focusTitle("URL", focused))
+		title := "URL"
+		if a.dirty {
+			title += " *"
+		}
+		col := borderColor(focused)
+		if a.urlEditing || a.dirty {
+			col = currentTheme.Secondary // yellow: editing / unsaved changes
+		}
+		drawBorder(g, methodW+1, 0, maxX-1, 2, col, "[^U] "+focusTitle(title, focused))
 	}
 
 	if v, err := g.SetView("sidebar", 0, 3, sidebarW, maxY-3); err != nil {
@@ -208,7 +220,11 @@ func layout(g *gocui.Gui, a *App) error {
 		} else {
 			v.Title = tabNames[a.activeTab]
 		}
-		drawBorder(g, rightX0, 6, maxX-1, contentY1, borderColor(a.subFocus), "[^B] "+focusTitle(v.Title, a.subFocus))
+		contentCol := borderColor(a.subFocus)
+		if a.subFocus {
+			contentCol = currentTheme.Secondary // yellow while actively editing
+		}
+		drawBorder(g, rightX0, 6, maxX-1, contentY1, contentCol, "[^B] "+focusTitle(v.Title, a.subFocus))
 	}
 
 	if a.contentFocusPending {

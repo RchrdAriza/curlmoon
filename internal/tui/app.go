@@ -89,6 +89,18 @@ type App struct {
 	authText    string
 	scriptsText string
 
+	// urlEditing is the URL bar's "insert mode": in normal mode the URL view
+	// is not editable (keystrokes navigate), and pressing the edit key flips
+	// this on so typing modifies the URL — a vim-style modal edit. subFocus is
+	// the equivalent insert mode for the tab content view.
+	urlEditing bool
+	// dirty marks the loaded request as having edits not yet written back to
+	// its collection item; surfaced as a "*" in the URL bar.
+	dirty bool
+	// editSnapshot captures the whole editable request state on entering edit
+	// mode so CancelEdit can revert it.
+	editSnapshot requestSnapshot
+
 	sending bool
 
 	response    *httpclient.Response
@@ -531,6 +543,8 @@ func (a *App) recordHistory(errMsg string, statusCode int, elapsed string) {
 // CycleMethod moves the selected HTTP method by delta (wrapping around).
 func (a *App) CycleMethod(delta int) {
 	a.methodIndex = ((a.methodIndex+delta)%len(methods) + len(methods)) % len(methods)
+	// syncActiveMethod persists the method to the collection immediately, so a
+	// method change alone doesn't leave the request dirty.
 	a.syncActiveMethod()
 }
 
@@ -552,6 +566,7 @@ func (a *App) PrevTab() {
 // while the Body tab is active.
 func (a *App) CycleBodyType(delta int) {
 	a.bodyType = ((a.bodyType+delta)%len(bodyTypes) + len(bodyTypes)) % len(bodyTypes)
+	a.markDirty()
 }
 
 // CycleAuthType moves the selected auth type (None/Basic/Bearer/API Key/
@@ -564,6 +579,7 @@ func (a *App) CycleAuthType(delta int) {
 	if a.authText == "" {
 		a.authText = authPlaceholder(a.authType)
 	}
+	a.markDirty()
 }
 
 // ToggleCodegen opens/closes the "generate code" overlay (Ctrl+G).
@@ -662,9 +678,71 @@ func (a *App) SelectSidebarEntry() bool {
 	}
 	a.activeCollIdx = item.collIdx
 	a.activeItemPath = append([]int{}, item.itemPath...)
+	a.loadRequestTabs(item)
 	a.activePanel = panelURL
 	a.statusMsg = fmt.Sprintf("Loaded %q", item.name)
 	return true
+}
+
+// loadRequestTabs replaces the Headers/Body/Auth/Params/Scripts tab buffers
+// with the content of the selected request. Without this, switching requests
+// leaves the previously loaded request's tabs in place, so its headers/body/
+// scripts appear to "belong" to the newly selected one. When the entry can't
+// be resolved to a stored collection item (e.g. the built-in example sidebar,
+// which has no store), the tabs are just reset to their empty defaults.
+func (a *App) loadRequestTabs(entry sidebarEntry) {
+	// A freshly loaded request starts clean and out of edit mode.
+	a.dirty = false
+	a.urlEditing = false
+	a.headersText = ""
+	a.paramsText = ""
+	a.bodyText = ""
+	a.bodyType = 0
+	a.authType = authNone
+	a.authText = ""
+	a.scriptsText = defaultScriptsText
+
+	if entry.collIdx < 0 || entry.collIdx >= len(a.collections) {
+		return
+	}
+	it, ok := a.collections[entry.collIdx].ItemAt(entry.itemPath)
+	if !ok || it.Request == nil {
+		return
+	}
+	req := it.Request
+
+	var headers []KeyValuePair
+	for _, h := range req.Header {
+		headers = append(headers, KeyValuePair{Key: h.Key, Value: h.Value})
+	}
+	a.headersText = serializeKV(headers)
+
+	if req.Body != nil {
+		switch req.Body.Mode {
+		case "graphql":
+			a.bodyType = bodyTypeGraphQL
+			if req.Body.GraphQL != nil {
+				a.bodyText = composeGraphQLBody(req.Body.GraphQL.Query, req.Body.GraphQL.Variables)
+			}
+		case "raw":
+			a.bodyText = req.Body.Raw
+			a.bodyType = 2 // raw
+			if req.Body.Options != nil && req.Body.Options.Raw != nil && req.Body.Options.Raw.Language == "json" {
+				a.bodyType = 1 // JSON
+			}
+		}
+	}
+
+	var preReq, test string
+	for _, ev := range it.Event {
+		switch ev.Listen {
+		case "prerequest":
+			preReq = ev.Script.ExecText()
+		case "test":
+			test = ev.Script.ExecText()
+		}
+	}
+	a.scriptsText = serializeScripts(preReq, test)
 }
 
 // syncActiveMethod writes the current a.methodIndex back into the collection
@@ -685,19 +763,127 @@ func (a *App) syncActiveMethod() {
 	a.rebuildSidebar()
 }
 
+// requestSnapshot is the full editable request state, captured on entering
+// edit mode so CancelEdit can restore it verbatim.
+type requestSnapshot struct {
+	urlValue    string
+	methodIndex int
+	bodyType    int
+	authType    int
+	headersText string
+	paramsText  string
+	bodyText    string
+	authText    string
+	scriptsText string
+}
+
+func (a *App) snapshot() requestSnapshot {
+	return requestSnapshot{
+		urlValue: a.urlValue, methodIndex: a.methodIndex, bodyType: a.bodyType,
+		authType: a.authType, headersText: a.headersText, paramsText: a.paramsText,
+		bodyText: a.bodyText, authText: a.authText, scriptsText: a.scriptsText,
+	}
+}
+
+func (a *App) restoreSnapshot(s requestSnapshot) {
+	a.urlValue, a.methodIndex, a.bodyType = s.urlValue, s.methodIndex, s.bodyType
+	a.authType, a.headersText, a.paramsText = s.authType, s.headersText, s.paramsText
+	a.bodyText, a.authText, a.scriptsText = s.bodyText, s.authText, s.scriptsText
+}
+
+// markDirty flags the loaded request as edited-but-unsaved. Called from the
+// editor on any text-modifying keystroke and from the method/body/auth cyclers.
+func (a *App) markDirty() { a.dirty = true }
+
+// inEditMode reports whether either editable field (URL bar or tab content) is
+// in its insert/edit mode right now.
+func (a *App) inEditMode() bool { return a.urlEditing || a.subFocus }
+
+// EnterEditURL flips the URL bar into insert mode, snapshotting current state
+// for a possible CancelEdit. No-op (returns false) if already editing so a
+// literal "i" typed while editing doesn't clobber the snapshot.
+func (a *App) EnterEditURL() bool {
+	if a.urlEditing || a.subFocus {
+		return false
+	}
+	a.editSnapshot = a.snapshot()
+	a.urlEditing = true
+	a.statusMsg = "Editing URL — Esc save · Ctrl+X cancel"
+	return true
+}
+
 // EnterContentEditor moves focus into the tab content view (headers/body/
 // auth/params/scripts). The gocui focus switch itself happens on the next
 // layout() tick (see contentFocusPending) rather than inline in the caller.
 func (a *App) EnterContentEditor() bool {
+	if a.subFocus {
+		return false
+	}
+	a.editSnapshot = a.snapshot()
 	a.subFocus = true
 	a.contentFocusPending = true
-	a.statusMsg = "Esc to exit editor"
+	a.statusMsg = "Editing — Esc save · Ctrl+X cancel"
 	return true
 }
 
 func (a *App) ExitContentEditor() {
 	a.subFocus = false
 	a.statusMsg = "Exited editor"
+}
+
+// CancelEdit reverts any in-progress edit to the snapshot taken when edit mode
+// began and leaves edit mode. The caller is responsible for re-rendering the
+// affected views from the restored App state.
+func (a *App) CancelEdit() {
+	a.restoreSnapshot(a.editSnapshot)
+	a.urlEditing = false
+	a.subFocus = false
+	a.dirty = false
+	a.statusMsg = "Edit cancelled"
+}
+
+// buildRequestItem reconstructs a collection leaf item named name from the
+// current editor buffers — the single source of truth shared by "save as new
+// request" and "save changes to the active request".
+func (a *App) buildRequestItem(name string) collection.Item {
+	item := collection.NewRequestItem(name, methods[a.methodIndex], a.buildURL(), a.buildHeaders(), a.buildBody(), bodyTypes[a.bodyType])
+	if a.bodyType == bodyTypeGraphQL {
+		query, vars := parseGraphQLBody(a.bodyText)
+		item.Request.Body = &collection.Body{Mode: "graphql", GraphQL: &collection.GraphQLBody{Query: query, Variables: vars}}
+	}
+	preReq, test := parseScripts(a.scriptsText)
+	if preReq != "" {
+		item.Event = append(item.Event, collection.Event{Listen: "prerequest", Script: collection.NewScript(preReq)})
+	}
+	if test != "" {
+		item.Event = append(item.Event, collection.Event{Listen: "test", Script: collection.NewScript(test)})
+	}
+	return item
+}
+
+// SaveActiveRequest writes the current editor buffers back into the collection
+// item the sidebar last loaded (activeCollIdx/activeItemPath), persists it, and
+// clears the dirty flag. Returns false (a no-op) when nothing addressable is
+// loaded — e.g. a history entry or a scratch request with no backing item.
+func (a *App) SaveActiveRequest() bool {
+	if a.store == nil || a.activeCollIdx < 0 || a.activeCollIdx >= len(a.collections) || len(a.activeItemPath) == 0 {
+		return false
+	}
+	c := a.collections[a.activeCollIdx]
+	it, ok := c.ItemAt(a.activeItemPath)
+	if !ok || it.Request == nil {
+		return false
+	}
+	name := it.Name
+	*it = a.buildRequestItem(name)
+	if err := a.store.Save(c); err != nil {
+		a.statusMsg = fmt.Sprintf("Error saving: %v", err)
+		return false
+	}
+	a.dirty = false
+	a.statusMsg = fmt.Sprintf("Saved %q", name)
+	a.rebuildSidebar()
+	return true
 }
 
 // toggleActiveEnvironment activates the environment at envIdx, or
@@ -812,19 +998,7 @@ func (a *App) ConfirmPrompt() {
 		name := strings.TrimSpace(a.promptText)
 		if name != "" && target.collIdx < len(a.collections) {
 			c := a.collections[target.collIdx]
-			item := collection.NewRequestItem(name, methods[a.methodIndex], a.buildURL(), a.buildHeaders(), a.buildBody(), bodyTypes[a.bodyType])
-			if a.bodyType == bodyTypeGraphQL {
-				query, vars := parseGraphQLBody(a.bodyText)
-				item.Request.Body = &collection.Body{Mode: "graphql", GraphQL: &collection.GraphQLBody{Query: query, Variables: vars}}
-			}
-			preReq, test := parseScripts(a.scriptsText)
-			if preReq != "" {
-				item.Event = append(item.Event, collection.Event{Listen: "prerequest", Script: collection.NewScript(preReq)})
-			}
-			if test != "" {
-				item.Event = append(item.Event, collection.Event{Listen: "test", Script: collection.NewScript(test)})
-			}
-			c.AddItemAt(nil, item)
+			c.AddItemAt(nil, a.buildRequestItem(name))
 			if err := a.store.Save(c); err != nil {
 				a.statusMsg = fmt.Sprintf("Error: %v", err)
 			} else {

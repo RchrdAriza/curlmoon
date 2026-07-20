@@ -37,3 +37,10 @@ func parseScripts(text string) (preRequest, test string) {
 	test = strings.TrimSpace(strings.Join(sections[scriptTestDelim], "\n"))
 	return
 }
+
+// serializeScripts is the inverse of parseScripts: it lays the two script
+// sections back into the delimited text the Scripts tab edits. With both
+// sections empty it reproduces defaultScriptsText exactly.
+func serializeScripts(preRequest, test string) string {
+	return scriptPreRequestDelim + "\n" + preRequest + "\n" + scriptTestDelim + "\n" + test
+}

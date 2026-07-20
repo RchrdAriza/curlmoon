@@ -21,6 +21,9 @@ var bracketClosers = map[rune]rune{'{': '}', '[': ']', '(': ')'}
 
 func (e *appEditor) Edit(v *gocui.View, key gocui.Key, ch rune, mod gocui.Modifier) {
 	jsonBody := v.Name() == "content" && e.app.activeTab == tabBody && e.app.bodyType == 1
+	// Edits to the URL bar or a tab's content mark the loaded request dirty
+	// (an unsaved "*"); the env/prompt overlays are their own thing.
+	reqField := v.Name() == "url" || v.Name() == "content"
 
 	if key == gocui.KeyEnter {
 		switch v.Name() {
@@ -30,6 +33,7 @@ func (e *appEditor) Edit(v *gocui.View, key gocui.Key, ch rune, mod gocui.Modifi
 		if jsonBody {
 			jsonNewLine(v)
 			recolorJSON(v)
+			e.app.markDirty()
 			return
 		}
 	}
@@ -40,6 +44,7 @@ func (e *appEditor) Edit(v *gocui.View, key gocui.Key, ch rune, mod gocui.Modifi
 			v.EditWrite(closer)
 			v.MoveCursor(-1, 0, true)
 			recolorJSON(v)
+			e.app.markDirty()
 			return
 		}
 		if isBracketCloser(ch) {
@@ -56,6 +61,7 @@ func (e *appEditor) Edit(v *gocui.View, key gocui.Key, ch rune, mod gocui.Modifi
 			v.EditDelete(false)
 			v.EditDelete(true)
 			recolorJSON(v)
+			e.app.markDirty()
 			return
 		}
 	}
@@ -71,11 +77,16 @@ func (e *appEditor) Edit(v *gocui.View, key gocui.Key, ch rune, mod gocui.Modifi
 	}
 	gocui.DefaultEditor.Edit(v, key, ch, mod)
 
-	if jsonBody && editModifiesText(key, ch) {
-		recolorJSON(v)
-	}
-	if v.Name() == "url" && editModifiesText(key, ch) {
-		recolorURL(v)
+	if editModifiesText(key, ch) {
+		if reqField {
+			e.app.markDirty()
+		}
+		if jsonBody {
+			recolorJSON(v)
+		}
+		if v.Name() == "url" {
+			recolorURL(v)
+		}
 	}
 }
 

@@ -66,6 +66,170 @@ func TestNewAppWithStore_LoadsExistingCollections(t *testing.T) {
 	}
 }
 
+func TestSelectSidebarEntry_LoadsOwnTabsAndDoesNotInherit(t *testing.T) {
+	store := collection.NewStore(t.TempDir())
+	c, _ := store.Create("Stuff")
+	full := collection.NewRequestItem("Full", "POST", "https://example.com/a",
+		map[string]string{"X-Token": "abc"}, `{"hi":true}`, "JSON")
+	full.Event = append(full.Event, collection.Event{
+		Listen: "prerequest", Script: collection.NewScript("pm.environment.set('x', 1)"),
+	})
+	c.AddItemAt(nil, full)
+	c.AddItemAt(nil, collection.NewRequestItem("Bare", "GET", "https://example.com/b", nil, "", ""))
+	store.Save(c)
+
+	a := NewAppWithStore(store)
+
+	selectByName := func(name string) {
+		for i, e := range a.sidebar {
+			if e.name == name && !e.isFolder {
+				a.sidebarSel = i
+				if !a.SelectSidebarEntry() {
+					t.Fatalf("expected %q to load as a request", name)
+				}
+				return
+			}
+		}
+		t.Fatalf("sidebar entry %q not found in %+v", name, a.sidebar)
+	}
+
+	selectByName("Full")
+	if a.headersText != "X-Token: abc" {
+		t.Errorf("expected Full's headers loaded, got %q", a.headersText)
+	}
+	if a.bodyText != `{"hi":true}` || a.bodyType != 1 {
+		t.Errorf("expected Full's JSON body loaded, got type=%d body=%q", a.bodyType, a.bodyText)
+	}
+	pre, _ := parseScripts(a.scriptsText)
+	if pre != "pm.environment.set('x', 1)" {
+		t.Errorf("expected Full's pre-request script loaded, got %q", pre)
+	}
+
+	// Switching to a request with no headers/body/scripts must not inherit
+	// Full's tab content.
+	selectByName("Bare")
+	if a.headersText != "" {
+		t.Errorf("expected headers reset for Bare, got %q", a.headersText)
+	}
+	if a.bodyText != "" || a.bodyType != 0 {
+		t.Errorf("expected body reset for Bare, got type=%d body=%q", a.bodyType, a.bodyText)
+	}
+	if a.scriptsText != defaultScriptsText {
+		t.Errorf("expected scripts reset to default for Bare, got %q", a.scriptsText)
+	}
+}
+
+// selectRequestByName finds a non-folder sidebar entry and loads it.
+func selectRequestByName(t *testing.T, a *App, name string) {
+	t.Helper()
+	for i, e := range a.sidebar {
+		if e.name == name && !e.isFolder {
+			a.sidebarSel = i
+			if !a.SelectSidebarEntry() {
+				t.Fatalf("expected %q to load", name)
+			}
+			return
+		}
+	}
+	t.Fatalf("sidebar entry %q not found", name)
+}
+
+func TestSaveActiveRequest_PersistsEditsToDisk(t *testing.T) {
+	store := collection.NewStore(t.TempDir())
+	c, _ := store.Create("C")
+	c.AddItemAt(nil, collection.NewRequestItem("R", "GET", "https://ex.com/r", nil, "", ""))
+	store.Save(c)
+
+	a := NewAppWithStore(store)
+	selectRequestByName(t, a, "R")
+
+	// Edit several tabs, as the editor would.
+	for i, m := range methods {
+		if m == "POST" {
+			a.methodIndex = i
+		}
+	}
+	a.bodyType = 1 // JSON
+	a.bodyText = `{"a":1}`
+	a.headersText = "X-Test: yes"
+	a.markDirty()
+
+	if !a.dirty {
+		t.Fatal("expected request to be dirty after edits")
+	}
+	if !a.SaveActiveRequest() {
+		t.Fatal("expected SaveActiveRequest to succeed")
+	}
+	if a.dirty {
+		t.Error("expected dirty cleared after save")
+	}
+
+	// A fresh app loading the same store must see the persisted edits.
+	b := NewAppWithStore(store)
+	selectRequestByName(t, b, "R")
+	if methods[b.methodIndex] != "POST" {
+		t.Errorf("method not persisted, got %s", methods[b.methodIndex])
+	}
+	if b.bodyText != `{"a":1}` || b.bodyType != 1 {
+		t.Errorf("body not persisted, got type=%d body=%q", b.bodyType, b.bodyText)
+	}
+	if got := kvToMap(parseKV(b.headersText)); got["X-Test"] != "yes" {
+		t.Errorf("header not persisted, got %q", b.headersText)
+	}
+}
+
+func TestSaveActiveRequest_NoOpWithoutActiveItem(t *testing.T) {
+	store := collection.NewStore(t.TempDir())
+	a := NewAppWithStore(store)
+	a.activeCollIdx = -1
+	if a.SaveActiveRequest() {
+		t.Error("expected SaveActiveRequest to be a no-op with no active request")
+	}
+}
+
+func TestCancelEdit_RevertsSnapshot(t *testing.T) {
+	a := NewApp()
+	a.urlValue = "https://original"
+	a.bodyText = "orig-body"
+
+	if !a.EnterEditURL() {
+		t.Fatal("expected to enter URL edit mode")
+	}
+	if a.EnterEditURL() {
+		t.Error("expected EnterEditURL to no-op while already editing")
+	}
+
+	a.urlValue = "https://changed"
+	a.bodyText = "changed-body"
+	a.markDirty()
+
+	a.CancelEdit()
+	if a.urlEditing {
+		t.Error("expected edit mode to end after cancel")
+	}
+	if a.dirty {
+		t.Error("expected not dirty after cancel")
+	}
+	if a.urlValue != "https://original" || a.bodyText != "orig-body" {
+		t.Errorf("cancel did not revert, got url=%q body=%q", a.urlValue, a.bodyText)
+	}
+}
+
+func TestLoadRequestClearsDirtyAndEditMode(t *testing.T) {
+	store := collection.NewStore(t.TempDir())
+	c, _ := store.Create("C")
+	c.AddItemAt(nil, collection.NewRequestItem("R", "GET", "https://ex.com/r", nil, "", ""))
+	store.Save(c)
+	a := NewAppWithStore(store)
+
+	a.dirty = true
+	a.urlEditing = true
+	selectRequestByName(t, a, "R")
+	if a.dirty || a.urlEditing {
+		t.Errorf("loading a request should reset dirty/urlEditing, got dirty=%v editing=%v", a.dirty, a.urlEditing)
+	}
+}
+
 func TestSidebar_CreateCollection(t *testing.T) {
 	store := collection.NewStore(t.TempDir())
 	a := NewAppWithStore(store)
