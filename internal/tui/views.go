@@ -117,22 +117,10 @@ func layout(g *gocui.Gui, a *App) error {
 		rightX0 = maxX - 3
 	}
 
-	if v, err := g.SetView("sidebar", 0, 0, sidebarW, maxY-3); err != nil {
-		if err != gocui.ErrUnknownView {
-			return err
-		}
-		v.Frame = false
-		renderSidebar(v, a)
-	} else {
-		renderSidebar(v, a)
-	}
-	if v, err := g.View("sidebar"); err == nil {
-		focused := a.activePanel == panelSidebar
-		drawBorder(g, 0, 0, sidebarW, maxY-3, borderColor(focused), "[^S] "+v.Title)
-	}
-
+	// The method box + URL bar occupy a full-width row across the top; the
+	// sidebar and the request/response columns start below it (y >= 3).
 	methodW := 9
-	if v, err := g.SetView("method", rightX0, 0, rightX0+methodW, 2); err != nil {
+	if v, err := g.SetView("method", 0, 0, methodW, 2); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
@@ -147,10 +135,10 @@ func layout(g *gocui.Gui, a *App) error {
 		if focused {
 			mc |= gocui.AttrBold
 		}
-		drawBorder(g, rightX0, 0, rightX0+methodW, 2, mc, "")
+		drawBorder(g, 0, 0, methodW, 2, mc, "")
 	}
 
-	if v, err := g.SetView("url", rightX0+methodW+1, 0, maxX-1, 2); err != nil {
+	if v, err := g.SetView("url", methodW+1, 0, maxX-1, 2); err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
@@ -164,7 +152,21 @@ func layout(g *gocui.Gui, a *App) error {
 	}
 	{
 		focused := a.activePanel == panelURL && !a.subFocus
-		drawBorder(g, rightX0+methodW+1, 0, maxX-1, 2, borderColor(focused), "[^U] "+focusTitle("URL", focused))
+		drawBorder(g, methodW+1, 0, maxX-1, 2, borderColor(focused), "[^U] "+focusTitle("URL", focused))
+	}
+
+	if v, err := g.SetView("sidebar", 0, 3, sidebarW, maxY-3); err != nil {
+		if err != gocui.ErrUnknownView {
+			return err
+		}
+		v.Frame = false
+		renderSidebar(v, a)
+	} else {
+		renderSidebar(v, a)
+	}
+	if v, err := g.View("sidebar"); err == nil {
+		focused := a.activePanel == panelSidebar
+		drawBorder(g, 0, 3, sidebarW, maxY-3, borderColor(focused), "[^S] "+v.Title)
 	}
 
 	if v, err := g.SetView("tabs", rightX0, 3, maxX-1, 5); err != nil {
