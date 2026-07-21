@@ -1,6 +1,6 @@
-# Binary
-curlmoon*
-curlmoon.exe
+# Binary (anchored to repo root so it doesn't match the cmd/curlmoon/ dir)
+/curlmoon
+/curlmoon.exe
 
 # IDE
 .vscode/

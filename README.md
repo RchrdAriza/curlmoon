@@ -42,9 +42,29 @@ the keyboard.
 
 Requires Go 1.24+.
 
+### One-liner (recommended)
+
+The installer checks for the Go toolchain, verifies its version, detects your
+platform and install prefix (Termux `$PREFIX`, `/usr/local/bin`, or
+`~/.local/bin`), then builds and installs `curlmoon`:
+
 ```bash
-git clone https://github.com/<you>/curlmoon
+curl -fsSL https://raw.githubusercontent.com/RchrdAriza/curlmoon/master/install.sh | sh
+```
+
+To uninstall, run `./install.sh --uninstall`, or just `rm $(command -v curlmoon)`.
+
+### Manual
+
+```bash
+git clone https://github.com/RchrdAriza/curlmoon
 cd curlmoon
+./install.sh          # same checks as the one-liner, builds from your checkout
+```
+
+Or build by hand if you'd rather skip the script:
+
+```bash
 go build -o $PREFIX/bin/curlmoon ./cmd/curlmoon   # Termux
 # or, on any other system:
 go build -o /usr/local/bin/curlmoon ./cmd/curlmoon
