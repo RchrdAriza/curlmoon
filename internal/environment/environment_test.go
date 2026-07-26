@@ -73,6 +73,68 @@ func TestParseDotenv_InvalidLine(t *testing.T) {
 	}
 }
 
+func TestStore_ImportPostmanEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	jsonData := `{
+		"name": "Staging",
+		"values": [
+			{"key": "HOST", "value": "staging.example.com", "enabled": true},
+			{"key": "PORT", "value": "8080", "enabled": false}
+		]
+	}`
+	path := filepath.Join(dir, "staging.postman_environment.json")
+	if err := os.WriteFile(path, []byte(jsonData), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	s := NewStore(t.TempDir())
+	env, err := s.ImportPostmanEnvironment(path)
+	if err != nil {
+		t.Fatalf("ImportPostmanEnvironment failed: %v", err)
+	}
+	if env.Name != "Staging" {
+		t.Errorf("expected env name Staging, got %s", env.Name)
+	}
+	if env.Vars()["HOST"] != "staging.example.com" {
+		t.Errorf("expected HOST var, got %v", env.Vars())
+	}
+	if _, ok := env.Vars()["PORT"]; ok {
+		t.Error("expected disabled var PORT to be excluded")
+	}
+
+	loaded, err := s.LoadAll()
+	if err != nil {
+		t.Fatalf("LoadAll failed: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Name != "Staging" {
+		t.Errorf("expected imported env persisted, got %v", loaded)
+	}
+}
+
+func TestStore_ImportPostmanEnvironment_NoName(t *testing.T) {
+	s := NewStore(t.TempDir())
+	dir := t.TempDir()
+	path := filepath.Join(dir, "unnamed.json")
+	if err := os.WriteFile(path, []byte(`{"values": []}`), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if _, err := s.ImportPostmanEnvironment(path); err == nil {
+		t.Error("expected error for environment without name")
+	}
+}
+
+func TestStore_ImportPostmanEnvironment_InvalidJSON(t *testing.T) {
+	s := NewStore(t.TempDir())
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(path, []byte(`not json`), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if _, err := s.ImportPostmanEnvironment(path); err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+}
+
 func TestStore_ImportDotenv(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "prod.env")

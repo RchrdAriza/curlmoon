@@ -47,7 +47,13 @@ func main() {
 
 	var lastEnv string
 	for _, path := range envFiles {
-		env, err := envStore.ImportDotenv(path)
+		var env *environment.Environment
+		var err error
+		if strings.HasSuffix(strings.ToLower(path), ".json") {
+			env, err = envStore.ImportPostmanEnvironment(path)
+		} else {
+			env, err = envStore.ImportDotenv(path)
+		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "curlmoon: importing env:", err)
 			os.Exit(1)

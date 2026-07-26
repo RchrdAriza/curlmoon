@@ -224,6 +224,26 @@ func ParseDotenv(data []byte) ([]KeyVal, error) {
 	return values, nil
 }
 
+// ImportPostmanEnvironment reads a Postman v2.1 environment JSON file and
+// persists it. The environment name comes from the JSON's "name" field.
+func (s *Store) ImportPostmanEnvironment(path string) (*Environment, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var env Environment
+	if err := json.Unmarshal(data, &env); err != nil {
+		return nil, fmt.Errorf("parsing Postman environment %s: %w", path, err)
+	}
+	if env.Name == "" {
+		return nil, fmt.Errorf("Postman environment %s has no name", path)
+	}
+	if err := s.Save(&env); err != nil {
+		return nil, err
+	}
+	return &env, nil
+}
+
 // ImportDotenv reads a .env file and persists it as an environment named
 // after the file (its base name without extension), overwriting any
 // existing environment with that name.
